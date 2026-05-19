@@ -1,18 +1,25 @@
 #include <Arduino.h>
 
-// put function declarations here:
-int myFunction(int, int);
+// const int Pin_Motor_Aufzug = 4;
+int testLEDPinHigh = 4;
+int testLEDPinLow = 5;
+
+
 
 void setup() {
-  // put your setup code here, to run once:
-  int result = myFunction(2, 3);
+    //pinMode(Pin_Motor_Aufzug, OUTPUT);
+    pinMode(testLEDPinHigh, OUTPUT);
+    pinMode(testLEDPinLow, OUTPUT);
+    digitalWrite(testLEDPinHigh, HIGH);
+    digitalWrite(testLEDPinLow, LOW);
+    Serial.begin(115200);
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
-}
+    //digitalWrite(Pin_Motor_Aufzug, HIGH);
+    delay(500);
+    Serial.println("Sketch läuft");
 
-// put function definitions here:
-int myFunction(int x, int y) {
-  return x + y;
+    //digitalWrite(Pin_Motor_Aufzug, LOW);
+    delay(500);
 }
