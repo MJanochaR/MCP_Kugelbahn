@@ -25,6 +25,10 @@
 // Schalter
 #define PIN_LINKS_STELLUNG_SCHALTER0 A4
 
+// WLAN
+#define WIFI_SSID "TP-Link_2B5A"
+#define WIFI_PASS "65817742"
+
 // Constants
 const unsigned long LAMP_BLINK_MS = 1000;
 const unsigned long MOTOR_RUN_MS = 600;
