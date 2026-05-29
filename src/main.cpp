@@ -1,43 +1,16 @@
 #include <Arduino.h>
-#include <mbed.h>
 
-// Outputs - Dual Pins
-#define PIN_R_MAUFZUG      17
-#define PIN_G_MAUFZUG      16
-#define PIN_R_MROEHRE      5
-#define PIN_G_MROEHRE      4
-#define PIN_R_MLOOP        7
-#define PIN_G_MLOOP        6
+#include "config.h"
+#include "actuators.h"
+#include "buttons.h"
 
-// Servo
-#define PIN_SERVO          3
+// BUTTONS --------------------------------------------------------------------------------------------
+Button taster0(PIN_TASTER0);
+Button taster1(PIN_TASTER1);
+Button taster2(PIN_TASTER2);
+Button taster3(PIN_TASTER3);
 
-// Outputs - Single Pins
-#define PIN_R_LAMPE_GRUEN  12
-#define PIN_R_LAMPE_ROT    13
-
-// Inputs - Single Pins
-#define PIN_TASTER0        A0
-#define PIN_TASTER1        A1
-#define PIN_TASTER2        A2
-#define PIN_TASTER3        A3
-
-// Inputs - Multi Pins
-#define PIN_LINKS_STELLUNG_Schalter0 A4
-
-// Servo PWM
-mbed::PwmOut servoPin(digitalPinToPinName(PIN_SERVO));
-
-const int SERVO_ZU = 40;
-const int SERVO_AUF = 60;
-bool servoAuf = false;
-
-// Variablen
-unsigned long letzterWechsel = 0;
-const unsigned long wechselIntervall = 1000;
-bool lampenAn = false;
-
-// Motor-Test Tastersteuerung
+// VAR --------------------------------------------------------------------------------------------
 bool richtungLoop = false;
 bool richtungRoehre = false;
 
@@ -47,127 +20,81 @@ bool motorRoehreAktiv = false;
 unsigned long startLoop = 0;
 unsigned long startRoehre = 0;
 
-const unsigned long motorLaufzeit = 1000;
+bool servoAuf = false;
 
-bool letzterTaster0 = HIGH;
-bool letzterTaster1 = HIGH;
-bool letzterTaster2 = HIGH;
+bool lampenAn = false;
+unsigned long letzterLampenWechsel = 0;
 
-void setMotor(int pinR, int pinG, bool richtung) {
-    if (richtung) {
-        digitalWrite(pinR, HIGH);
-        digitalWrite(pinG, LOW);
-    } else {
-        digitalWrite(pinR, LOW);
-        digitalWrite(pinG, HIGH);
-    }
-}
 
-void stopMotor(int pinR, int pinG) {
-    digitalWrite(pinR, LOW);
-    digitalWrite(pinG, LOW);
-}
-
-void setServoWinkel(int winkel) {
-    int puls = map(winkel, 0, 180, 500, 2500);
-    servoPin.period_ms(20);
-    servoPin.pulsewidth_us(puls);
-}
-
+// --------------------------------------------------------------------------------------------
 void setup() {
     Serial.begin(115200);
 
-    pinMode(PIN_R_MAUFZUG, OUTPUT);
-    pinMode(PIN_G_MAUFZUG, OUTPUT);
-    pinMode(PIN_R_MROEHRE, OUTPUT);
-    pinMode(PIN_G_MROEHRE, OUTPUT);
-    pinMode(PIN_R_MLOOP, OUTPUT);
-    pinMode(PIN_G_MLOOP, OUTPUT);
+    Actuators::begin();
 
-    pinMode(PIN_R_LAMPE_GRUEN, OUTPUT);
-    pinMode(PIN_R_LAMPE_ROT, OUTPUT);
+    taster0.begin();
+    taster1.begin();
+    taster2.begin();
+    taster3.begin();
 
-    pinMode(PIN_TASTER0, INPUT_PULLUP);
-    pinMode(PIN_TASTER1, INPUT_PULLUP);
-    pinMode(PIN_TASTER2, INPUT_PULLUP);
-    pinMode(PIN_TASTER3, INPUT_PULLUP);
-
-    pinMode(PIN_LINKS_STELLUNG_Schalter0, INPUT_PULLUP);
-
-    stopMotor(PIN_R_MAUFZUG, PIN_G_MAUFZUG);
-    stopMotor(PIN_R_MROEHRE, PIN_G_MROEHRE);
-    stopMotor(PIN_R_MLOOP, PIN_G_MLOOP);
-
-    setServoWinkel(SERVO_ZU);
+    pinMode(PIN_LINKS_STELLUNG_SCHALTER0, INPUT_PULLUP);
 }
-
+// --------------------------------------------------------------------------------------------
 void loop() {
     unsigned long jetzt = millis();
 
-    // Aufzugsmotor steuern
-    if (digitalRead(PIN_LINKS_STELLUNG_Schalter0) == LOW) {
-        setMotor(PIN_R_MAUFZUG, PIN_G_MAUFZUG, true);
+    // Aufzug steuern
+    if (digitalRead(PIN_LINKS_STELLUNG_SCHALTER0) == LOW) {
+        Actuators::setMotor(PIN_R_MAUFZUG, PIN_G_MAUFZUG, true);
     } else {
-        stopMotor(PIN_R_MAUFZUG, PIN_G_MAUFZUG);
+        Actuators::stopMotor(PIN_R_MAUFZUG, PIN_G_MAUFZUG);
     }
-
-    // Taster lesen
-    bool taster0 = digitalRead(PIN_TASTER0);
-    bool taster1 = digitalRead(PIN_TASTER1);
-    bool taster2 = digitalRead(PIN_TASTER2);
-
-    // Taster0 -> Loop Motor
-    if (letzterTaster0 == HIGH && taster0 == LOW) {
+    
+    // Motor Loop Stellung wechseln
+    if (taster0.pressed()) {
         richtungLoop = !richtungLoop;
         motorLoopAktiv = true;
-        startLoop = millis();
+        startLoop = jetzt;
 
-        setMotor(PIN_R_MLOOP, PIN_G_MLOOP, richtungLoop);
+        Actuators::setMotor(PIN_R_MLOOP, PIN_G_MLOOP, richtungLoop);
     }
 
-    // Taster1 -> Roehre Motor
-    if (letzterTaster1 == HIGH && taster1 == LOW) {
+    // Motor Röhre Stellung wechseln
+    if (taster1.pressed()) {
         richtungRoehre = !richtungRoehre;
         motorRoehreAktiv = true;
-        startRoehre = millis();
+        startRoehre = jetzt;
 
-        setMotor(PIN_R_MROEHRE, PIN_G_MROEHRE, richtungRoehre);
+        Actuators::setMotor(PIN_R_MROEHRE, PIN_G_MROEHRE, richtungRoehre);
     }
 
-    // Taster2 -> Servo Auf / Zu
-    if (letzterTaster2 == HIGH && taster2 == LOW) {
+    // Servo Röhre Stellung wechseln
+    if (taster2.pressed()) {
         servoAuf = !servoAuf;
-
-        if (servoAuf) {
-            setServoWinkel(SERVO_AUF);
-        } else {
-            setServoWinkel(SERVO_ZU);
-        }
+        Actuators::setServoWinkel(servoAuf ? SERVROEHRE_AUF : SERVROEHRE_ZU);
     }
 
-    // Loop Motor nach 1 Sekunde stoppen
-    if (motorLoopAktiv && millis() - startLoop >= motorLaufzeit) {
-        stopMotor(PIN_R_MLOOP, PIN_G_MLOOP);
+    // Motoren nach vorgegebener Zeit stoppen. Zeit für Endposition
+    if (motorLoopAktiv && jetzt - startLoop >= MOTOR_RUN_MS) {
+        Actuators::stopMotor(PIN_R_MLOOP, PIN_G_MLOOP);
         motorLoopAktiv = false;
     }
-
-    // Roehre Motor nach 1 Sekunde stoppen
-    if (motorRoehreAktiv && millis() - startRoehre >= motorLaufzeit) {
-        stopMotor(PIN_R_MROEHRE, PIN_G_MROEHRE);
+    if (motorRoehreAktiv && jetzt - startRoehre >= MOTOR_RUN_MS) {
+        Actuators::stopMotor(PIN_R_MROEHRE, PIN_G_MROEHRE);
         motorRoehreAktiv = false;
     }
 
-    // alte Tasterwerte speichern
-    letzterTaster0 = taster0;
-    letzterTaster1 = taster1;
-    letzterTaster2 = taster2;
-
-    // Lampen blinken
-    if (jetzt - letzterWechsel >= wechselIntervall) {
-        letzterWechsel = jetzt;
-
+    // Blinken der LEDs
+    if (jetzt - letzterLampenWechsel >= LAMP_BLINK_MS) {
+        letzterLampenWechsel = jetzt;
         lampenAn = !lampenAn;
-        digitalWrite(PIN_R_LAMPE_GRUEN, lampenAn ? HIGH : LOW);
-        digitalWrite(PIN_R_LAMPE_ROT, lampenAn ? HIGH : LOW);
-    }   
+
+        Actuators::setLampen(lampenAn);
+    }
+
+
+    
+
+
+
 }
