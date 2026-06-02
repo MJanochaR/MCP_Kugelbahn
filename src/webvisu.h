@@ -6,6 +6,7 @@ struct WebVisuState {
     IPAddress ip;
 
     bool aufzugAktiv;
+    bool anlageScharf;
     bool loopAktiv;
     bool loopRichtung;
     bool roehreAktiv;
@@ -18,8 +19,14 @@ struct WebVisuState {
     bool taster2;
     bool taster3;
     bool schalterLinks;
+    bool lichtschrankeOben;
+    bool lichtschrankeUnten;
 
     unsigned long uptimeMs;
+    bool messungAktiv;
+    unsigned long messungStartMs;
+    unsigned long messungLetzteMs;
+    unsigned long messungAnzahl;
     unsigned long loopStartMs;
     unsigned long roehreStartMs;
     unsigned long loopSchaltungen;
@@ -33,6 +40,7 @@ namespace WebVisu {
         CMD_LOOP_TOGGLE,
         CMD_ROEHRE_TOGGLE,
         CMD_SERVO_TOGGLE,
+        CMD_AUFZUG_TOGGLE,
         CMD_LAMP_TOGGLE,
         CMD_ALL_STOP
     };

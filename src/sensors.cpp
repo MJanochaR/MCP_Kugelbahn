@@ -48,3 +48,54 @@ bool Input::triggered() {
 bool Input::isActive() const {
     return _activeLow ? (_stableState == LOW) : (_stableState == HIGH);
 }
+
+AnalogLightBarrier::AnalogLightBarrier(int pin, int threshold, unsigned long debounceMs)
+    : _pin(pin), _threshold(threshold), _debounceMs(debounceMs),
+      _stableActive(false), _lastActive(false), _lastChange(0),
+      _pendingTrigger(false), _lastValue(0) {
+}
+
+void AnalogLightBarrier::begin() {
+    pinMode(_pin, INPUT);
+    _lastValue = analogRead(_pin);
+    _stableActive = _lastValue >= _threshold;
+    _lastActive = _stableActive;
+    _lastChange = millis();
+}
+
+void AnalogLightBarrier::update() {
+    _lastValue = analogRead(_pin);
+    bool active = _lastValue >= _threshold;
+
+    if (active != _lastActive) {
+        _lastChange = millis();
+        _lastActive = active;
+    }
+
+    if (millis() - _lastChange >= _debounceMs && active != _stableActive) {
+        bool wasActive = _stableActive;
+        _stableActive = active;
+
+        if (!wasActive && _stableActive) {
+            _pendingTrigger = true;
+        }
+    }
+}
+
+bool AnalogLightBarrier::triggered() {
+    update();
+
+    if (_pendingTrigger) {
+        _pendingTrigger = false;
+        return true;
+    }
+    return false;
+}
+
+bool AnalogLightBarrier::isActive() const {
+    return _stableActive;
+}
+
+int AnalogLightBarrier::value() const {
+    return _lastValue;
+}

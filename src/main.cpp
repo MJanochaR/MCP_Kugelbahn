@@ -4,6 +4,7 @@
 #include "actuators.h"
 #include "buttons.h"
 #include "config.h"
+#include "sensors.h"
 #include "webvisu.h"
 
 namespace {
@@ -11,6 +12,8 @@ namespace {
     Button taster1(PIN_TASTER1);
     Button taster2(PIN_TASTER2);
     Button taster3(PIN_TASTER3);
+    AnalogLightBarrier lichtschrankeOben(PIN_SENSOR_LICHTSCHRANKE_OBEN, LICHTSCHRANKE_ADC_SCHWELLE, LICHTSCHRANKE_DEBOUNCE_MS);
+    AnalogLightBarrier lichtschrankeUnten(PIN_SENSOR_LICHTSCHRANKE_UNTEN, LICHTSCHRANKE_ADC_SCHWELLE, LICHTSCHRANKE_DEBOUNCE_MS);
 
     struct Anlage {
         bool loopRichtung = false;
@@ -18,11 +21,16 @@ namespace {
         bool loopAktiv = false;
         bool roehreAktiv = false;
         bool aufzugAktiv = false;
+        bool anlageScharf = false;
         bool servoAuf = false;
         bool lampenAn = false;
+        bool messungAktiv = false;
         unsigned long loopStartMs = 0;
         unsigned long roehreStartMs = 0;
+        unsigned long messungStartMs = 0;
+        unsigned long messungLetzteMs = 0;
         unsigned long lampenWechselMs = 0;
+        unsigned long messungAnzahl = 0;
         unsigned long loopSchaltungen = 0;
         unsigned long roehreSchaltungen = 0;
         unsigned long servoSchaltungen = 0;
@@ -30,6 +38,30 @@ namespace {
 
     bool aktivLow(int pin) {
         return digitalRead(pin) == LOW;
+    }
+
+    void printUptime(unsigned long jetzt) {
+        unsigned long totalSeconds = jetzt / 1000;
+        unsigned long hours = totalSeconds / 3600;
+        unsigned long minutes = (totalSeconds / 60) % 60;
+        unsigned long seconds = totalSeconds % 60;
+
+        if (hours < 10) Serial.print('0');
+        Serial.print(hours);
+        Serial.print(':');
+        if (minutes < 10) Serial.print('0');
+        Serial.print(minutes);
+        Serial.print(':');
+        if (seconds < 10) Serial.print('0');
+        Serial.print(seconds);
+        Serial.print(' ');
+    }
+
+    void printLichtschranke(const char* name, unsigned long jetzt) {
+        printUptime(jetzt);
+        Serial.print("Lichtschranke ");
+        Serial.print(name);
+        Serial.println(" erkannt");
     }
 
     void setLampen(bool an) {
@@ -62,6 +94,15 @@ namespace {
         Actuators::setServoWinkel(anlage.servoAuf ? SERVROEHRE_AUF : SERVROEHRE_ZU);
     }
 
+    void schalteAufzug() {
+        anlage.aufzugAktiv = !anlage.aufzugAktiv;
+        if (anlage.aufzugAktiv) {
+            Actuators::setMotor(PIN_R_MAUFZUG, PIN_G_MAUFZUG, true);
+        } else {
+            Actuators::stopMotor(PIN_R_MAUFZUG, PIN_G_MAUFZUG);
+        }
+    }
+
     void stoppeAlles() {
         Actuators::stopMotor(PIN_R_MAUFZUG, PIN_G_MAUFZUG);
         Actuators::stopMotor(PIN_R_MLOOP, PIN_G_MLOOP);
@@ -71,13 +112,10 @@ namespace {
         anlage.roehreAktiv = false;
     }
 
-    void updateAufzug() {
-        anlage.aufzugAktiv = aktivLow(PIN_LINKS_STELLUNG_SCHALTER0);
-
-        if (anlage.aufzugAktiv) {
-            Actuators::setMotor(PIN_R_MAUFZUG, PIN_G_MAUFZUG, true);
-        } else {
-            Actuators::stopMotor(PIN_R_MAUFZUG, PIN_G_MAUFZUG);
+    void updateSchalter() {
+        anlage.anlageScharf = aktivLow(PIN_LINKS_STELLUNG_SCHALTER0);
+        if (!anlage.anlageScharf) {
+            anlage.messungAktiv = false;
         }
     }
 
@@ -87,11 +125,36 @@ namespace {
         if (taster2.pressed()) schalteServo();
     }
 
+    void updateLichtschranken(unsigned long jetzt) {
+        if (lichtschrankeOben.triggered()) {
+            printLichtschranke("oben", jetzt);
+            if (anlage.anlageScharf) {
+                anlage.messungAktiv = true;
+                anlage.messungStartMs = jetzt;
+            }
+        }
+
+        if (lichtschrankeUnten.triggered()) {
+            printLichtschranke("unten", jetzt);
+            if (anlage.anlageScharf && anlage.messungAktiv) {
+                anlage.messungLetzteMs = jetzt - anlage.messungStartMs;
+                anlage.messungAnzahl++;
+                anlage.messungAktiv = false;
+
+                printUptime(jetzt);
+                Serial.print("Zeitmessung: ");
+                Serial.print(anlage.messungLetzteMs);
+                Serial.println(" ms");
+            }
+        }
+    }
+
     void updateWebCommand(unsigned long jetzt) {
         switch (WebVisu::consumeCommand()) {
             case WebVisu::CMD_LOOP_TOGGLE: schalteLoop(jetzt); break;
             case WebVisu::CMD_ROEHRE_TOGGLE: schalteRoehre(jetzt); break;
             case WebVisu::CMD_SERVO_TOGGLE: schalteServo(); break;
+            case WebVisu::CMD_AUFZUG_TOGGLE: schalteAufzug(); break;
             case WebVisu::CMD_LAMP_TOGGLE:
                 anlage.lampenWechselMs = jetzt;
                 setLampen(!anlage.lampenAn);
@@ -114,6 +177,12 @@ namespace {
     }
 
     void updateLampen(unsigned long jetzt) {
+        if (!anlage.anlageScharf) {
+            anlage.lampenWechselMs = jetzt;
+            if (anlage.lampenAn) setLampen(false);
+            return;
+        }
+
         if (jetzt - anlage.lampenWechselMs >= LAMP_BLINK_MS) {
             anlage.lampenWechselMs = jetzt;
             setLampen(!anlage.lampenAn);
@@ -125,6 +194,7 @@ namespace {
         s.wifiConnected = WiFi.status() == WL_CONNECTED;
         s.ip = WiFi.localIP();
         s.aufzugAktiv = anlage.aufzugAktiv;
+        s.anlageScharf = anlage.anlageScharf;
         s.loopAktiv = anlage.loopAktiv;
         s.loopRichtung = anlage.loopRichtung;
         s.roehreAktiv = anlage.roehreAktiv;
@@ -136,7 +206,13 @@ namespace {
         s.taster2 = aktivLow(PIN_TASTER2);
         s.taster3 = aktivLow(PIN_TASTER3);
         s.schalterLinks = aktivLow(PIN_LINKS_STELLUNG_SCHALTER0);
+        s.lichtschrankeOben = lichtschrankeOben.isActive();
+        s.lichtschrankeUnten = lichtschrankeUnten.isActive();
         s.uptimeMs = jetzt;
+        s.messungAktiv = anlage.messungAktiv;
+        s.messungStartMs = anlage.messungStartMs;
+        s.messungLetzteMs = anlage.messungLetzteMs;
+        s.messungAnzahl = anlage.messungAnzahl;
         s.loopStartMs = anlage.loopStartMs;
         s.roehreStartMs = anlage.roehreStartMs;
         s.loopSchaltungen = anlage.loopSchaltungen;
@@ -154,6 +230,12 @@ void setup() {
     taster2.begin();
     taster3.begin();
     pinMode(PIN_LINKS_STELLUNG_SCHALTER0, INPUT_PULLUP);
+    pinMode(PIN_LED_LICHTSCHRANKE_OBEN, OUTPUT);
+    pinMode(PIN_LED_LICHTSCHRANKE_UNTEN, OUTPUT);
+    digitalWrite(PIN_LED_LICHTSCHRANKE_OBEN, HIGH);
+    digitalWrite(PIN_LED_LICHTSCHRANKE_UNTEN, HIGH);
+    lichtschrankeOben.begin();
+    lichtschrankeUnten.begin();
 
     WebVisu::begin(WIFI_SSID, WIFI_PASS);
 }
@@ -161,8 +243,9 @@ void setup() {
 void loop() {
     unsigned long jetzt = millis();
 
-    updateAufzug();
+    updateSchalter();
     updateTaster(jetzt);
+    updateLichtschranken(jetzt);
     updateWebCommand(jetzt);
     stoppeZeitMotoren(jetzt);
     updateLampen(jetzt);

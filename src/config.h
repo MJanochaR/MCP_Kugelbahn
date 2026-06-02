@@ -20,6 +20,14 @@
 
 #define PIN_LINKS_STELLUNG_SCHALTER0 A4
 
+#define PIN_LED_LICHTSCHRANKE_OBEN     8
+#define PIN_SENSOR_LICHTSCHRANKE_OBEN  A5
+#define PIN_LED_LICHTSCHRANKE_UNTEN    9
+#define PIN_SENSOR_LICHTSCHRANKE_UNTEN A6
+
+const int LICHTSCHRANKE_ADC_SCHWELLE = 100;
+const unsigned long LICHTSCHRANKE_DEBOUNCE_MS = 50;
+
 #define WIFI_SSID "TP-Link_2B5A"
 #define WIFI_PASS "65817742"
 
@@ -30,7 +38,7 @@ const IPAddress WIFI_GATEWAY(192, 168, 0, 1);
 const IPAddress WIFI_SUBNET(255, 255, 255, 0);
 const IPAddress WIFI_DNS(192, 168, 0, 1);
 
-const unsigned long WEBVISU_STATUS_MS = 10000;
+const unsigned long WEBVISU_STATUS_MS = 120000;
 const unsigned long WIFI_RECONNECT_MS = 10000;
 const unsigned long WIFI_CONNECT_TIMEOUT_MS = 15000;
 const unsigned long LAMP_BLINK_MS = 1000;

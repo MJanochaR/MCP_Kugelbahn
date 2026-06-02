@@ -18,11 +18,29 @@ namespace {
         return value ? "true" : "false";
     }
 
+    void printUptime(unsigned long now) {
+        unsigned long totalSeconds = now / 1000;
+        unsigned long hours = totalSeconds / 3600;
+        unsigned long minutes = (totalSeconds / 60) % 60;
+        unsigned long seconds = totalSeconds % 60;
+
+        if (hours < 10) Serial.print('0');
+        Serial.print(hours);
+        Serial.print(':');
+        if (minutes < 10) Serial.print('0');
+        Serial.print(minutes);
+        Serial.print(':');
+        if (seconds < 10) Serial.print('0');
+        Serial.print(seconds);
+        Serial.print(' ');
+    }
+
     void printWebVisuStatus(const char* message, bool force = false) {
         unsigned long now = millis();
         if (!force && now - lastStatusMs < WEBVISU_STATUS_MS) return;
 
         lastStatusMs = now;
+        printUptime(now);
         Serial.print("WebVisu: ");
         Serial.print(message);
         Serial.print(" | WLAN=");
@@ -53,6 +71,7 @@ namespace {
     void reconnectIfNeeded() {
         if (WiFi.status() == WL_CONNECTED) {
             startServer();
+            printWebVisuStatus("Server aktiv");
             return;
         }
 
@@ -66,8 +85,20 @@ namespace {
         connectWifi(WIFI_SSID, WIFI_PASS);
     }
 
-    bool startsWith(const String& line, const char* path) {
-        return line.startsWith(path);
+    String requestPath(const String& line) {
+        int firstSpace = line.indexOf(' ');
+        if (firstSpace < 0) return "";
+
+        int secondSpace = line.indexOf(' ', firstSpace + 1);
+        if (secondSpace < 0) {
+            return line.substring(firstSpace + 1);
+        }
+
+        return line.substring(firstSpace + 1, secondSpace);
+    }
+
+    bool isRootPath(const String& path) {
+        return path == "/" || path == "/index.html" || path.startsWith("/?");
     }
 
     void sendHeader(WiFiClient& client, const char* status, const char* type) {
@@ -91,9 +122,14 @@ namespace {
         client.print("\"wifi\":"); client.print(onOff(lastState.wifiConnected)); client.print(',');
         client.print("\"ip\":\""); client.print(lastState.ip); client.print("\",");
         client.print("\"uptimeMs\":"); client.print(lastState.uptimeMs); client.print(',');
+        client.print("\"messungAktiv\":"); client.print(onOff(lastState.messungAktiv)); client.print(',');
+        client.print("\"messungStartMs\":"); client.print(lastState.messungStartMs); client.print(',');
+        client.print("\"messungLetzteMs\":"); client.print(lastState.messungLetzteMs); client.print(',');
+        client.print("\"messungAnzahl\":"); client.print(lastState.messungAnzahl); client.print(',');
         client.print("\"loopStartMs\":"); client.print(lastState.loopStartMs); client.print(',');
         client.print("\"roehreStartMs\":"); client.print(lastState.roehreStartMs); client.print(',');
         client.print("\"aufzugAktiv\":"); client.print(onOff(lastState.aufzugAktiv)); client.print(',');
+        client.print("\"anlageScharf\":"); client.print(onOff(lastState.anlageScharf)); client.print(',');
         client.print("\"loopAktiv\":"); client.print(onOff(lastState.loopAktiv)); client.print(',');
         client.print("\"loopRichtung\":"); client.print(onOff(lastState.loopRichtung)); client.print(',');
         client.print("\"roehreAktiv\":"); client.print(onOff(lastState.roehreAktiv)); client.print(',');
@@ -105,6 +141,8 @@ namespace {
         client.print("\"taster2\":"); client.print(onOff(lastState.taster2)); client.print(',');
         client.print("\"taster3\":"); client.print(onOff(lastState.taster3)); client.print(',');
         client.print("\"schalterLinks\":"); client.print(onOff(lastState.schalterLinks)); client.print(',');
+        client.print("\"lichtschrankeOben\":"); client.print(onOff(lastState.lichtschrankeOben)); client.print(',');
+        client.print("\"lichtschrankeUnten\":"); client.print(onOff(lastState.lichtschrankeUnten)); client.print(',');
         client.print("\"loopSchaltungen\":"); client.print(lastState.loopSchaltungen); client.print(',');
         client.print("\"roehreSchaltungen\":"); client.print(lastState.roehreSchaltungen); client.print(',');
         client.print("\"servoSchaltungen\":"); client.print(lastState.servoSchaltungen);
@@ -115,6 +153,7 @@ namespace {
         if (requestLine.indexOf("do=loop") >= 0) pendingCommand = WebVisu::CMD_LOOP_TOGGLE;
         else if (requestLine.indexOf("do=roehre") >= 0) pendingCommand = WebVisu::CMD_ROEHRE_TOGGLE;
         else if (requestLine.indexOf("do=servo") >= 0) pendingCommand = WebVisu::CMD_SERVO_TOGGLE;
+        else if (requestLine.indexOf("do=aufzug") >= 0) pendingCommand = WebVisu::CMD_AUFZUG_TOGGLE;
         else if (requestLine.indexOf("do=lamp") >= 0) pendingCommand = WebVisu::CMD_LAMP_TOGGLE;
         else if (requestLine.indexOf("do=stop") >= 0) pendingCommand = WebVisu::CMD_ALL_STOP;
     }
@@ -128,21 +167,41 @@ namespace {
         }
     }
 
+    String readRequestLine(WiFiClient& client) {
+        unsigned long start = millis();
+        while (client.connected() && millis() - start < 200) {
+            if (!client.available()) continue;
+
+            String line = client.readStringUntil('\n');
+            line.trim();
+            if (line.length() > 0) return line;
+        }
+
+        return "";
+    }
+
     void handleClient(WiFiClient& client) {
-        client.setTimeout(50);
+        client.setTimeout(200);
 
-        String requestLine = client.readStringUntil('\r');
-        client.readStringUntil('\n');
+        String requestLine = readRequestLine(client);
         skipHeaders(client);
+        String path = requestPath(requestLine);
 
-        if (startsWith(requestLine, "GET /api/status")) {
+        if (requestLine.length() == 0) {
+            Serial.println("WebVisu: leerer HTTP-Request");
+            sendPlain(client, "400 Bad Request", "Leerer Request");
+        } else if (path.startsWith("/api/status")) {
             sendJson(client);
-        } else if (startsWith(requestLine, "GET /cmd")) {
+        } else if (path.startsWith("/cmd")) {
             rememberCommand(requestLine);
             sendPlain(client, "200 OK", "OK");
-        } else if (startsWith(requestLine, "GET / ")) {
+        } else if (isRootPath(path)) {
             WebVisuFrontend::sendIndex(client);
+        } else if (path == "/favicon.ico") {
+            sendPlain(client, "204 No Content", "");
         } else {
+            Serial.print("WebVisu: unbekannter Pfad ");
+            Serial.println(path);
             sendPlain(client, "404 Not Found", "Nicht gefunden");
         }
 
@@ -155,6 +214,12 @@ namespace WebVisu {
 
 void begin(const char* ssid, const char* pass) {
     Serial.begin(115200);
+    unsigned long serialStart = millis();
+    while (!Serial && millis() - serialStart < 2000) {
+        delay(10);
+    }
+
+    printWebVisuStatus("Start", true);
     connectWifi(ssid, pass);
 
     unsigned long start = millis();

@@ -38,3 +38,25 @@ public:
     explicit LightBarrier(int pin, unsigned long debounceMs = 50, bool activeLow = true)
         : Input(pin, debounceMs, activeLow) {}
 };
+
+class AnalogLightBarrier {
+public:
+    explicit AnalogLightBarrier(int pin, int threshold, unsigned long debounceMs = 50);
+
+    void begin();
+    void update();
+    bool triggered();
+    bool isActive() const;
+    int value() const;
+
+private:
+    int _pin;
+    int _threshold;
+    unsigned long _debounceMs;
+
+    bool _stableActive;
+    bool _lastActive;
+    unsigned long _lastChange;
+    bool _pendingTrigger;
+    int _lastValue;
+};

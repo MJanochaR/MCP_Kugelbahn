@@ -46,8 +46,8 @@ pre{background:#111827;color:#e5e7eb;padding:12px;border-radius:12px;overflow:au
 <div class="grid">
  <div class="card"><div class="muted">WLAN / IP</div><div id="wifi" class="big">...</div><div id="ip" class="muted"></div></div>
  <div class="card"><div class="muted">Uptime</div><div id="uptime" class="big">...</div></div>
- <div class="card"><div class="muted">Aufzug</div><div id="aufzug" class="big">...</div></div>
- <div class="card"><div class="muted">Lampen</div><div id="lampen" class="big">...</div></div>
+ <div class="card"><div class="muted">Anlage</div><div id="anlage" class="big">...</div></div>
+ <div class="card"><div class="muted">Zeitmessung</div><div id="messung" class="big">...</div><div id="messungInfo" class="muted"></div></div>
 </div>
 
 <h2>Aktoren</h2>
@@ -75,9 +75,33 @@ pre{background:#111827;color:#e5e7eb;padding:12px;border-radius:12px;overflow:au
  </div>
 
  <div class="card">
+   <h3>Aufzug</h3>
+   <p>Status: <span id="aufzug" class="value"></span></p>
+   <button onclick="cmd('aufzug')">Aufzug umschalten</button>
+ </div>
+
+ <div class="card">
    <h3>Notbedienung</h3>
+   <p>Lampen: <span id="lampen" class="value"></span></p>
    <button onclick="cmd('lamp')">Lampen umschalten</button>
    <button class="stop" onclick="cmd('stop')">Alle stoppen</button>
+ </div>
+</div>
+
+<h2>Zeitmessung</h2>
+<div class="grid">
+ <div class="card">
+   <h3>Kugelzeit</h3>
+   <p>Status: <span id="messungStatus" class="value"></span></p>
+   <p>Aktuelle Laufzeit: <b id="messungLive"></b></p>
+   <p>Letzte Zeit: <b id="messungLetzte"></b></p>
+   <p>Messungen: <b id="messungAnzahl"></b></p>
+ </div>
+
+ <div class="card">
+   <h3>Lichtschranken</h3>
+   <p>Oben Start: <span id="lsOben" class="value"></span></p>
+   <p>Unten Ende: <span id="lsUnten" class="value"></span></p>
  </div>
 </div>
 
@@ -120,6 +144,11 @@ function ms(t){
   return `${h}h ${m}m ${s}s`;
 }
 
+function zeit(t){
+  if (!t) return '-';
+  return (t / 1000).toFixed(3) + ' s';
+}
+
 async function cmd(c){
   try {
     const r = await fetch('/cmd?do=' + c + '&t=' + Date.now());
@@ -146,10 +175,14 @@ async function load(){
     $('ip').textContent = d.ip;
     $('uptime').textContent = ms(d.uptimeMs);
 
+    $('anlage').textContent = d.anlageScharf ? 'SCHARF' : 'AUS';
+    cls($('anlage'), d.anlageScharf);
+    $('messung').textContent = d.messungAktiv ? 'LAEUFT' : zeit(d.messungLetzteMs);
+    cls($('messung'), d.messungAktiv || d.messungLetzteMs > 0);
+    $('messungInfo').textContent = d.messungAnzahl + ' Messungen';
+
     $('aufzug').textContent = txt(d.aufzugAktiv);
-    cls($('aufzug'), d.aufzugAktiv);
     $('lampen').textContent = txt(d.lampenAn);
-    cls($('lampen'), d.lampenAn);
 
     $('loop').textContent = txt(d.loopAktiv);
     $('loopR').textContent = d.loopRichtung ? 'Richtung A' : 'Richtung B';
@@ -160,12 +193,20 @@ async function load(){
     $('roehreBar').style.width = d.roehreAktiv ? Math.min(100, (d.uptimeMs - d.roehreStartMs) / MOTOR_RUN_MS * 100) + '%' : '0%';
 
     $('servo').textContent = d.servoAuf ? 'AUF' : 'ZU';
+    $('messungStatus').textContent = d.messungAktiv ? 'LAEUFT' : 'BEREIT';
+    $('messungLive').textContent = d.messungAktiv ? zeit(d.uptimeMs - d.messungStartMs) : '-';
+    $('messungLetzte').textContent = zeit(d.messungLetzteMs);
+    $('messungAnzahl').textContent = d.messungAnzahl;
+    $('lsOben').textContent = d.lichtschrankeOben ? 'BLOCKIERT' : 'FREI';
+    $('lsUnten').textContent = d.lichtschrankeUnten ? 'BLOCKIERT' : 'FREI';
     $('inputs').innerHTML =
       `<span class=pill>T0 ${txt(d.taster0)}</span><br>` +
       `<span class=pill>T1 ${txt(d.taster1)}</span><br>` +
       `<span class=pill>T2 ${txt(d.taster2)}</span><br>` +
       `<span class=pill>T3 ${txt(d.taster3)}</span><br>` +
-      `<span class=pill>Schalter ${txt(d.schalterLinks)}</span>`;
+      `<span class=pill>Schalter scharf ${txt(d.anlageScharf)}</span><br>` +
+      `<span class=pill>LS oben ${txt(d.lichtschrankeOben)}</span><br>` +
+      `<span class=pill>LS unten ${txt(d.lichtschrankeUnten)}</span>`;
 
     $('cntLoop').textContent = d.loopSchaltungen;
     $('cntRoehre').textContent = d.roehreSchaltungen;
