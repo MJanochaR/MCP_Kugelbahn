@@ -1,188 +1,171 @@
 #include <Arduino.h>
 #include <WiFi.h>
 
-#include "config.h"
 #include "actuators.h"
 #include "buttons.h"
+#include "config.h"
 #include "webvisu.h"
 
-// BUTTONS --------------------------------------------------------------------------------------------
-Button taster0(PIN_TASTER0);
-Button taster1(PIN_TASTER1);
-Button taster2(PIN_TASTER2);
-Button taster3(PIN_TASTER3);
+namespace {
+    Button taster0(PIN_TASTER0);
+    Button taster1(PIN_TASTER1);
+    Button taster2(PIN_TASTER2);
+    Button taster3(PIN_TASTER3);
 
-// VAR --------------------------------------------------------------------------------------------
-bool richtungLoop = false;
-bool richtungRoehre = false;
+    struct Anlage {
+        bool loopRichtung = false;
+        bool roehreRichtung = false;
+        bool loopAktiv = false;
+        bool roehreAktiv = false;
+        bool aufzugAktiv = false;
+        bool servoAuf = false;
+        bool lampenAn = false;
+        unsigned long loopStartMs = 0;
+        unsigned long roehreStartMs = 0;
+        unsigned long lampenWechselMs = 0;
+        unsigned long loopSchaltungen = 0;
+        unsigned long roehreSchaltungen = 0;
+        unsigned long servoSchaltungen = 0;
+    } anlage;
 
-bool motorLoopAktiv = false;
-bool motorRoehreAktiv = false;
-bool motorAufzugAktiv = false;
+    bool aktivLow(int pin) {
+        return digitalRead(pin) == LOW;
+    }
 
-unsigned long startLoop = 0;
-unsigned long startRoehre = 0;
+    void setLampen(bool an) {
+        anlage.lampenAn = an;
+        Actuators::setLampen(an);
+    }
 
-bool servoAuf = false;
+    void schalteMotor(bool& aktiv, bool& richtung, unsigned long& startMs,
+                      unsigned long& zaehler, int pinR, int pinG, unsigned long jetzt) {
+        richtung = !richtung;
+        aktiv = true;
+        startMs = jetzt;
+        zaehler++;
+        Actuators::setMotor(pinR, pinG, richtung);
+    }
 
-bool lampenAn = false;
-unsigned long letzterLampenWechsel = 0;
+    void schalteLoop(unsigned long jetzt) {
+        schalteMotor(anlage.loopAktiv, anlage.loopRichtung, anlage.loopStartMs,
+                     anlage.loopSchaltungen, PIN_R_MLOOP, PIN_G_MLOOP, jetzt);
+    }
 
-unsigned long loopSchaltungen = 0;
-unsigned long roehreSchaltungen = 0;
-unsigned long servoSchaltungen = 0;
+    void schalteRoehre(unsigned long jetzt) {
+        schalteMotor(anlage.roehreAktiv, anlage.roehreRichtung, anlage.roehreStartMs,
+                     anlage.roehreSchaltungen, PIN_R_MROEHRE, PIN_G_MROEHRE, jetzt);
+    }
 
-// --------------------------------------------------------------------------------------------
-void schalteLoop(unsigned long jetzt) {
-    richtungLoop = !richtungLoop;
-    motorLoopAktiv = true;
-    startLoop = jetzt;
-    loopSchaltungen++;
+    void schalteServo() {
+        anlage.servoAuf = !anlage.servoAuf;
+        anlage.servoSchaltungen++;
+        Actuators::setServoWinkel(anlage.servoAuf ? SERVROEHRE_AUF : SERVROEHRE_ZU);
+    }
 
-    Actuators::setMotor(PIN_R_MLOOP, PIN_G_MLOOP, richtungLoop);
+    void stoppeAlles() {
+        Actuators::stopMotor(PIN_R_MAUFZUG, PIN_G_MAUFZUG);
+        Actuators::stopMotor(PIN_R_MLOOP, PIN_G_MLOOP);
+        Actuators::stopMotor(PIN_R_MROEHRE, PIN_G_MROEHRE);
+        anlage.aufzugAktiv = false;
+        anlage.loopAktiv = false;
+        anlage.roehreAktiv = false;
+    }
+
+    void updateAufzug() {
+        anlage.aufzugAktiv = aktivLow(PIN_LINKS_STELLUNG_SCHALTER0);
+
+        if (anlage.aufzugAktiv) {
+            Actuators::setMotor(PIN_R_MAUFZUG, PIN_G_MAUFZUG, true);
+        } else {
+            Actuators::stopMotor(PIN_R_MAUFZUG, PIN_G_MAUFZUG);
+        }
+    }
+
+    void updateTaster(unsigned long jetzt) {
+        if (taster0.pressed()) schalteLoop(jetzt);
+        if (taster1.pressed()) schalteRoehre(jetzt);
+        if (taster2.pressed()) schalteServo();
+    }
+
+    void updateWebCommand(unsigned long jetzt) {
+        switch (WebVisu::consumeCommand()) {
+            case WebVisu::CMD_LOOP_TOGGLE: schalteLoop(jetzt); break;
+            case WebVisu::CMD_ROEHRE_TOGGLE: schalteRoehre(jetzt); break;
+            case WebVisu::CMD_SERVO_TOGGLE: schalteServo(); break;
+            case WebVisu::CMD_LAMP_TOGGLE:
+                anlage.lampenWechselMs = jetzt;
+                setLampen(!anlage.lampenAn);
+                break;
+            case WebVisu::CMD_ALL_STOP: stoppeAlles(); break;
+            case WebVisu::CMD_NONE: break;
+        }
+    }
+
+    void stoppeZeitMotoren(unsigned long jetzt) {
+        if (anlage.loopAktiv && jetzt - anlage.loopStartMs >= MOTOR_RUN_MS) {
+            Actuators::stopMotor(PIN_R_MLOOP, PIN_G_MLOOP);
+            anlage.loopAktiv = false;
+        }
+
+        if (anlage.roehreAktiv && jetzt - anlage.roehreStartMs >= MOTOR_RUN_MS) {
+            Actuators::stopMotor(PIN_R_MROEHRE, PIN_G_MROEHRE);
+            anlage.roehreAktiv = false;
+        }
+    }
+
+    void updateLampen(unsigned long jetzt) {
+        if (jetzt - anlage.lampenWechselMs >= LAMP_BLINK_MS) {
+            anlage.lampenWechselMs = jetzt;
+            setLampen(!anlage.lampenAn);
+        }
+    }
+
+    WebVisuState webStatus(unsigned long jetzt) {
+        WebVisuState s = {};
+        s.wifiConnected = WiFi.status() == WL_CONNECTED;
+        s.ip = WiFi.localIP();
+        s.aufzugAktiv = anlage.aufzugAktiv;
+        s.loopAktiv = anlage.loopAktiv;
+        s.loopRichtung = anlage.loopRichtung;
+        s.roehreAktiv = anlage.roehreAktiv;
+        s.roehreRichtung = anlage.roehreRichtung;
+        s.servoAuf = anlage.servoAuf;
+        s.lampenAn = anlage.lampenAn;
+        s.taster0 = aktivLow(PIN_TASTER0);
+        s.taster1 = aktivLow(PIN_TASTER1);
+        s.taster2 = aktivLow(PIN_TASTER2);
+        s.taster3 = aktivLow(PIN_TASTER3);
+        s.schalterLinks = aktivLow(PIN_LINKS_STELLUNG_SCHALTER0);
+        s.uptimeMs = jetzt;
+        s.loopStartMs = anlage.loopStartMs;
+        s.roehreStartMs = anlage.roehreStartMs;
+        s.loopSchaltungen = anlage.loopSchaltungen;
+        s.roehreSchaltungen = anlage.roehreSchaltungen;
+        s.servoSchaltungen = anlage.servoSchaltungen;
+        return s;
+    }
 }
 
-void schalteRoehre(unsigned long jetzt) {
-    richtungRoehre = !richtungRoehre;
-    motorRoehreAktiv = true;
-    startRoehre = jetzt;
-    roehreSchaltungen++;
-
-    Actuators::setMotor(PIN_R_MROEHRE, PIN_G_MROEHRE, richtungRoehre);
-}
-
-void schalteServo() {
-    servoAuf = !servoAuf;
-    servoSchaltungen++;
-    Actuators::setServoWinkel(servoAuf ? SERVROEHRE_AUF : SERVROEHRE_ZU);
-}
-
-void setzeLampen(bool an) {
-    lampenAn = an;
-    Actuators::setLampen(lampenAn);
-}
-
-void stoppeAlles() {
-    Actuators::stopMotor(PIN_R_MAUFZUG, PIN_G_MAUFZUG);
-    Actuators::stopMotor(PIN_R_MLOOP, PIN_G_MLOOP);
-    Actuators::stopMotor(PIN_R_MROEHRE, PIN_G_MROEHRE);
-    motorAufzugAktiv = false;
-    motorLoopAktiv = false;
-    motorRoehreAktiv = false;
-}
-
-WebVisuState baueWebStatus(unsigned long jetzt) {
-    WebVisuState s;
-    s.wifiConnected = WiFi.status() == WL_CONNECTED;
-    s.ip = WiFi.localIP();
-
-    s.aufzugAktiv = motorAufzugAktiv;
-    s.loopAktiv = motorLoopAktiv;
-    s.loopRichtung = richtungLoop;
-    s.roehreAktiv = motorRoehreAktiv;
-    s.roehreRichtung = richtungRoehre;
-    s.servoAuf = servoAuf;
-    s.lampenAn = lampenAn;
-
-    // INPUT_PULLUP: gedrückt/aktiv bedeutet LOW, daher invertieren.
-    s.taster0 = digitalRead(PIN_TASTER0) == LOW;
-    s.taster1 = digitalRead(PIN_TASTER1) == LOW;
-    s.taster2 = digitalRead(PIN_TASTER2) == LOW;
-    s.taster3 = digitalRead(PIN_TASTER3) == LOW;
-    s.schalterLinks = digitalRead(PIN_LINKS_STELLUNG_SCHALTER0) == LOW;
-
-    s.uptimeMs = jetzt;
-    s.loopStartMs = startLoop;
-    s.roehreStartMs = startRoehre;
-    s.loopSchaltungen = loopSchaltungen;
-    s.roehreSchaltungen = roehreSchaltungen;
-    s.servoSchaltungen = servoSchaltungen;
-    return s;
-}
-
-// --------------------------------------------------------------------------------------------
 void setup() {
-    Serial.begin(115200);
-
     Actuators::begin();
 
     taster0.begin();
     taster1.begin();
     taster2.begin();
     taster3.begin();
-
     pinMode(PIN_LINKS_STELLUNG_SCHALTER0, INPUT_PULLUP);
 
     WebVisu::begin(WIFI_SSID, WIFI_PASS);
 }
 
-// --------------------------------------------------------------------------------------------
 void loop() {
     unsigned long jetzt = millis();
 
-    // Aufzug steuern
-    if (digitalRead(PIN_LINKS_STELLUNG_SCHALTER0) == LOW) {
-        Actuators::setMotor(PIN_R_MAUFZUG, PIN_G_MAUFZUG, true);
-        motorAufzugAktiv = true;
-    } else {
-        Actuators::stopMotor(PIN_R_MAUFZUG, PIN_G_MAUFZUG);
-        motorAufzugAktiv = false;
-    }
+    updateAufzug();
+    updateTaster(jetzt);
+    updateWebCommand(jetzt);
+    stoppeZeitMotoren(jetzt);
+    updateLampen(jetzt);
 
-    // Motor Loop Stellung wechseln: physischer Taster oder WebVisu
-    if (taster0.pressed()) {
-        schalteLoop(jetzt);
-    }
-
-    // Motor Röhre Stellung wechseln: physischer Taster oder WebVisu
-    if (taster1.pressed()) {
-        schalteRoehre(jetzt);
-    }
-
-    // Servo Röhre Stellung wechseln: physischer Taster oder WebVisu
-    if (taster2.pressed()) {
-        schalteServo();
-    }
-
-    // Web-Kommandos ausführen
-    switch (WebVisu::consumeCommand()) {
-        case WebVisu::CMD_LOOP_TOGGLE:
-            schalteLoop(jetzt);
-            break;
-        case WebVisu::CMD_ROEHRE_TOGGLE:
-            schalteRoehre(jetzt);
-            break;
-        case WebVisu::CMD_SERVO_TOGGLE:
-            schalteServo();
-            break;
-        case WebVisu::CMD_LAMP_TOGGLE:
-            letzterLampenWechsel = jetzt;
-            setzeLampen(!lampenAn);
-            break;
-        case WebVisu::CMD_ALL_STOP:
-            stoppeAlles();
-            break;
-        case WebVisu::CMD_NONE:
-        default:
-            break;
-    }
-
-    // Motoren nach vorgegebener Zeit stoppen. Zeit für Endposition
-    if (motorLoopAktiv && jetzt - startLoop >= MOTOR_RUN_MS) {
-        Actuators::stopMotor(PIN_R_MLOOP, PIN_G_MLOOP);
-        motorLoopAktiv = false;
-    }
-    if (motorRoehreAktiv && jetzt - startRoehre >= MOTOR_RUN_MS) {
-        Actuators::stopMotor(PIN_R_MROEHRE, PIN_G_MROEHRE);
-        motorRoehreAktiv = false;
-    }
-
-    // Blinken der LEDs
-    if (jetzt - letzterLampenWechsel >= LAMP_BLINK_MS) {
-        letzterLampenWechsel = jetzt;
-        setzeLampen(!lampenAn);
-    }
-
-    // WebVisu muss regelmäßig laufen, damit Browser und API reagieren.
-    WebVisu::update(baueWebStatus(jetzt));
+    WebVisu::update(webStatus(jetzt));
 }
