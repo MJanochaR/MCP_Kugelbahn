@@ -18,18 +18,27 @@ void Button::begin() {
 
 bool Button::pressed() {
     bool reading = digitalRead(_pin);
+    bool pressed_event = false;
 
     if (reading != _lastReading) {
         _lastChange = millis();
-        _lastReading = reading;
     }
 
-    if (millis() - _lastChange >= BUTTON_DEBOUNCE_MS && reading != _stableState) {
-        bool oldState = _stableState;
-        _stableState = reading;
+    if ((millis() - _lastChange) >= BUTTON_DEBOUNCE_MS) {
+        if (reading != _stableState) {
+            bool oldState = _stableState;
+            _stableState = reading;
 
-        return oldState == HIGH && _stableState == LOW;
+            if (oldState == HIGH && _stableState == LOW) {
+                pressed_event = true;
+            }
+        }
     }
+    
+    _lastReading = reading;
+    return pressed_event;
+}
 
-    return false;
+bool Button::isPressed() const {
+    return digitalRead(_pin) == LOW;
 }

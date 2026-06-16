@@ -6,6 +6,7 @@ public:
 
     void begin();
     bool pressed();
+    bool isPressed() const;
 
 private:
     int _pin;

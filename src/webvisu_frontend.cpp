@@ -91,11 +91,12 @@ pre{background:#111827;color:#e5e7eb;padding:12px;border-radius:12px;overflow:au
 <h2>Zeitmessung</h2>
 <div class="grid">
  <div class="card">
-   <h3>Kugelzeit</h3>
-   <p>Status: <span id="messungStatus" class="value"></span></p>
-   <p>Aktuelle Laufzeit: <b id="messungLive"></b></p>
-   <p>Letzte Zeit: <b id="messungLetzte"></b></p>
-   <p>Messungen: <b id="messungAnzahl"></b></p>
+   <h3>Kugelzeiten (Messungen: <span id="messungAnzahl"></span>)</h3>
+   <table style="width:100%;text-align:left;border-collapse:collapse;font-size:14px;margin-top:10px;">
+     <tr style="border-bottom:1px solid #e5e7eb"><th>Kugel</th><th>Start</th><th>Ende</th><th>Laufzeit</th></tr>
+     <tbody id="kugelnBody">
+     </tbody>
+   </table>
  </div>
 
  <div class="card">
@@ -177,8 +178,12 @@ async function load(){
 
     $('anlage').textContent = d.anlageScharf ? 'SCHARF' : 'AUS';
     cls($('anlage'), d.anlageScharf);
-    $('messung').textContent = d.messungAktiv ? 'LAEUFT' : zeit(d.messungLetzteMs);
-    cls($('messung'), d.messungAktiv || d.messungLetzteMs > 0);
+    const k0 = d.kugeln && d.kugeln[0];
+    const messungAktiv = k0 ? k0.aktiv : false;
+    const messungLetzteMs = (k0 && !k0.aktiv) ? k0.dauerMs : 0;
+
+    $('messung').textContent = messungAktiv ? 'LAEUFT' : zeit(messungLetzteMs);
+    cls($('messung'), messungAktiv || messungLetzteMs > 0);
     $('messungInfo').textContent = d.messungAnzahl + ' Messungen';
 
     $('aufzug').textContent = txt(d.aufzugAktiv);
@@ -193,10 +198,16 @@ async function load(){
     $('roehreBar').style.width = d.roehreAktiv ? Math.min(100, (d.uptimeMs - d.roehreStartMs) / MOTOR_RUN_MS * 100) + '%' : '0%';
 
     $('servo').textContent = d.servoAuf ? 'AUF' : 'ZU';
-    $('messungStatus').textContent = d.messungAktiv ? 'LAEUFT' : 'BEREIT';
-    $('messungLive').textContent = d.messungAktiv ? zeit(d.uptimeMs - d.messungStartMs) : '-';
-    $('messungLetzte').textContent = zeit(d.messungLetzteMs);
-    $('messungAnzahl').textContent = d.messungAnzahl;
+    
+    let html = '';
+    if (d.kugeln) {
+      d.kugeln.forEach((k, idx) => {
+        let status = k.aktiv ? 'Läuft' : (k.abgeschlossen ? 'Abgeschlossen' : 'Bereit');
+        let dauer = k.aktiv ? zeit(d.uptimeMs - k.startMs) : (k.abgeschlossen ? zeit(k.dauerMs) : '-');
+        html += `<tr><td>Kugel ${idx + 1}</td><td>${k.startMs ? ms(k.startMs) : '-'}</td><td>${k.endMs ? ms(k.endMs) : '-'}</td><td>${dauer}</td></tr>`;
+      });
+    }
+    $('kugelnBody').innerHTML = html;
     $('lsOben').textContent = d.lichtschrankeOben ? 'BLOCKIERT' : 'FREI';
     $('lsUnten').textContent = d.lichtschrankeUnten ? 'BLOCKIERT' : 'FREI';
     $('inputs').innerHTML =

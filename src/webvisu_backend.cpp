@@ -13,6 +13,7 @@ namespace {
     bool serverStarted = false;
     unsigned long lastReconnectMs = 0;
     unsigned long lastStatusMs = 0;
+    bool lastSerialState = false;
 
     const char* onOff(bool value) {
         return value ? "true" : "false";
@@ -35,18 +36,53 @@ namespace {
         Serial.print(' ');
     }
 
+    const char* getWifiStatusString(int status) {
+        switch (status) {
+            case WL_NO_SHIELD: return "Kein WiFi-Modul gefunden";
+            case WL_IDLE_STATUS: return "Verbindung wird aufgebaut...";
+            case WL_NO_SSID_AVAIL: return "SSID nicht gefunden";
+            case WL_SCAN_COMPLETED: return "Scan abgeschlossen";
+            case WL_CONNECTED: return "Verbunden";
+            case WL_CONNECT_FAILED: return "Verbindung fehlgeschlagen";
+            case WL_CONNECTION_LOST: return "Verbindung verloren";
+            case WL_DISCONNECTED: return "Getrennt / Warte auf Reconnect";
+            default: return "Unbekannt";
+        }
+    }
+
+    bool isWifiActive() {
+        int status = WiFi.status();
+        return (status == WL_CONNECTED || status == WL_AP_LISTENING);
+    }
+
     void printWebVisuStatus(const char* message, bool force = false) {
         unsigned long now = millis();
-        if (!force && now - lastStatusMs < WEBVISU_STATUS_MS) return;
+        bool active = isWifiActive();
+        unsigned long interval = active ? 300000 : 10000; // 5 Minuten wenn aktiv, 10 Sekunden wenn inaktiv
+
+        if (!force && now - lastStatusMs < interval) return;
 
         lastStatusMs = now;
         printUptime(now);
         Serial.print("WebVisu: ");
         Serial.print(message);
         Serial.print(" | WLAN=");
-        Serial.print(WiFi.status() == WL_CONNECTED ? "OK" : "OFF");
+        Serial.print(active ? (WIFI_AP_MODE ? "AP_ACTIVE" : "OK") : "OFF");
+        if (!active) {
+            Serial.print(" (Grund: ");
+            Serial.print(getWifiStatusString(WiFi.status()));
+            Serial.print(")");
+        }
         Serial.print(" | IP=");
         Serial.println(WiFi.localIP());
+    }
+
+    void checkSerialMonitorTrigger() {
+        bool currentSerialState = Serial;
+        if (currentSerialState && !lastSerialState) {
+            printWebVisuStatus("Serial Monitor verbunden (Status-Dump)", true);
+        }
+        lastSerialState = currentSerialState;
     }
 
     void configureWifi() {
@@ -61,21 +97,38 @@ namespace {
         server.begin();
         serverStarted = true;
         printWebVisuStatus("Server bereit", true);
+        Serial.print("--> Web-Interface erreichbar unter: http://");
+        Serial.println(WiFi.localIP());
     }
 
     void connectWifi(const char* ssid, const char* pass) {
-        configureWifi();
-        WiFi.begin(ssid, pass);
+        if (WIFI_AP_MODE) {
+            if (WIFI_USE_STATIC_IP) {
+                WiFi.config(WIFI_LOCAL_IP, WIFI_LOCAL_IP, WIFI_SUBNET);
+            }
+            if (pass == nullptr || strlen(pass) == 0) {
+                Serial.println("WebVisu Warning: Kein Passwort angegeben. AP wird OFFEN gestartet.");
+                WiFi.beginAP(ssid, "");
+            } else if (strlen(pass) < 8) {
+                Serial.println("WebVisu Warning: WPA2 erfordert mind. 8 Zeichen. AP-Passwort wird auf '12345678' gesetzt.");
+                WiFi.beginAP(ssid, "12345678");
+            } else {
+                WiFi.beginAP(ssid, pass);
+            }
+        } else {
+            configureWifi();
+            WiFi.begin(ssid, pass);
+        }
     }
 
     void reconnectIfNeeded() {
-        if (WiFi.status() == WL_CONNECTED) {
+        if (isWifiActive()) {
             startServer();
-            printWebVisuStatus("Server aktiv");
+            printWebVisuStatus(WIFI_AP_MODE ? "Access Point aktiv" : "Server aktiv");
             return;
         }
 
-        printWebVisuStatus("WLAN getrennt");
+        printWebVisuStatus(WIFI_AP_MODE ? "Access Point inaktiv" : "WLAN getrennt");
 
         unsigned long now = millis();
         if (now - lastReconnectMs < WIFI_RECONNECT_MS) return;
@@ -122,9 +175,17 @@ namespace {
         client.print("\"wifi\":"); client.print(onOff(lastState.wifiConnected)); client.print(',');
         client.print("\"ip\":\""); client.print(lastState.ip); client.print("\",");
         client.print("\"uptimeMs\":"); client.print(lastState.uptimeMs); client.print(',');
-        client.print("\"messungAktiv\":"); client.print(onOff(lastState.messungAktiv)); client.print(',');
-        client.print("\"messungStartMs\":"); client.print(lastState.messungStartMs); client.print(',');
-        client.print("\"messungLetzteMs\":"); client.print(lastState.messungLetzteMs); client.print(',');
+        client.print("\"kugeln\":[");
+        for(int i=0; i<3; i++) {
+            client.print("{\"startMs\":"); client.print(lastState.kugeln[i].startMs);
+            client.print(",\"endMs\":"); client.print(lastState.kugeln[i].endMs);
+            client.print(",\"dauerMs\":"); client.print(lastState.kugeln[i].dauerMs);
+            client.print(",\"aktiv\":"); client.print(onOff(lastState.kugeln[i].aktiv));
+            client.print(",\"abgeschlossen\":"); client.print(onOff(lastState.kugeln[i].abgeschlossen));
+            client.print("}");
+            if (i < 2) client.print(",");
+        }
+        client.print("],");
         client.print("\"messungAnzahl\":"); client.print(lastState.messungAnzahl); client.print(',');
         client.print("\"loopStartMs\":"); client.print(lastState.loopStartMs); client.print(',');
         client.print("\"roehreStartMs\":"); client.print(lastState.roehreStartMs); client.print(',');
@@ -160,8 +221,11 @@ namespace {
 
     void skipHeaders(WiFiClient& client) {
         unsigned long start = millis();
-        while (client.connected() && millis() - start < 50) {
-            if (!client.available()) continue;
+        while (client.connected() && millis() - start < 30) {
+            if (!client.available()) {
+                delay(1);
+                continue;
+            }
             String line = client.readStringUntil('\n');
             if (line == "\r" || line.length() == 0) return;
         }
@@ -169,8 +233,11 @@ namespace {
 
     String readRequestLine(WiFiClient& client) {
         unsigned long start = millis();
-        while (client.connected() && millis() - start < 200) {
-            if (!client.available()) continue;
+        while (client.connected() && millis() - start < 150) {
+            if (!client.available()) {
+                delay(1);
+                continue;
+            }
 
             String line = client.readStringUntil('\n');
             line.trim();
@@ -214,27 +281,23 @@ namespace WebVisu {
 
 void begin(const char* ssid, const char* pass) {
     Serial.begin(115200);
-    unsigned long serialStart = millis();
-    while (!Serial && millis() - serialStart < 2000) {
-        delay(10);
-    }
-
     printWebVisuStatus("Start", true);
     connectWifi(ssid, pass);
 
     unsigned long start = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - start < WIFI_CONNECT_TIMEOUT_MS) {
+    while (!isWifiActive() && millis() - start < WIFI_CONNECT_TIMEOUT_MS) {
         delay(100);
     }
 
-    if (WiFi.status() == WL_CONNECTED) {
+    if (isWifiActive()) {
         startServer();
     } else {
-        printWebVisuStatus("WLAN Start fehlgeschlagen", true);
+        printWebVisuStatus(WIFI_AP_MODE ? "AP Start fehlgeschlagen" : "WLAN Start fehlgeschlagen", true);
     }
 }
 
 void update(const WebVisuState& state) {
+    checkSerialMonitorTrigger();
     lastState = state;
     reconnectIfNeeded();
 

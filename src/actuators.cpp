@@ -28,7 +28,6 @@ void begin() {
     stopMotor(PIN_R_MLOOP, PIN_G_MLOOP);
 
     setLampen(false);
-    setServoWinkel(SERVROEHRE_ZU);
 }
 
 void setMotor(int pinR, int pinG, bool richtung) {

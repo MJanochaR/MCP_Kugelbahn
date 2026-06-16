@@ -1,0 +1,8 @@
+CompileFlags:
+  QueryDriver:
+    - "C:/Users/Michal-Janocha/.platformio/packages/toolchain-gccarmnoneeabi/bin/arm-none-eabi-g++"
+    - "C:/Users/Michal-Janocha/.platformio/packages/toolchain-gccarmnoneeabi/bin/arm-none-eabi-g++.exe"
+
+Diagnostics:
+  Suppress:
+    - "ovl_no_viable_member_function_in_call"

@@ -23,10 +23,17 @@ struct WebVisuState {
     bool lichtschrankeUnten;
 
     unsigned long uptimeMs;
-    bool messungAktiv;
-    unsigned long messungStartMs;
-    unsigned long messungLetzteMs;
+    
+    struct KugelData {
+        unsigned long startMs;
+        unsigned long endMs;
+        unsigned long dauerMs;
+        bool aktiv;
+        bool abgeschlossen;
+    };
+    KugelData kugeln[3];
     unsigned long messungAnzahl;
+
     unsigned long loopStartMs;
     unsigned long roehreStartMs;
     unsigned long loopSchaltungen;

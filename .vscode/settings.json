@@ -1,0 +1,5 @@
+{
+  "clangd.arguments": [
+    "--query-driver=C:/Users/Michal-Janocha/.platformio/packages/toolchain-gccarmnoneeabi/bin/arm-none-eabi-*"
+  ]
+}
