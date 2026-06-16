@@ -7,5 +7,6 @@ namespace Actuators {
     void stopMotor(int pinR, int pinG);
 
     void setServoWinkel(int winkel);
+    void setServoStartWinkel(int winkel);
     void setLampen(bool an);
 }

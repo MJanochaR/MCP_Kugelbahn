@@ -6,6 +6,7 @@
 
 namespace {
     mbed::PwmOut servoPin(digitalPinToPinName(PIN_SERVROEHRE));
+    mbed::PwmOut servoStartPin(digitalPinToPinName(PIN_SERVOSTART));
 }
 
 namespace Actuators {
@@ -22,6 +23,7 @@ void begin() {
     pinMode(PIN_R_LAMPE_ROT, OUTPUT);
 
     servoPin.period_ms(20);
+    servoStartPin.period_ms(20);
 
     stopMotor(PIN_R_MAUFZUG, PIN_G_MAUFZUG);
     stopMotor(PIN_R_MROEHRE, PIN_G_MROEHRE);
@@ -43,6 +45,11 @@ void stopMotor(int pinR, int pinG) {
 void setServoWinkel(int winkel) {
     int puls = map(winkel, 0, 180, 500, 2500);
     servoPin.pulsewidth_us(puls);
+}
+
+void setServoStartWinkel(int winkel) {
+    int puls = map(winkel, 0, 180, 500, 2500);
+    servoStartPin.pulsewidth_us(puls);
 }
 
 void setLampen(bool an) {

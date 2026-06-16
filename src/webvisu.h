@@ -33,15 +33,26 @@ struct WebVisuState {
     };
     KugelData kugeln[3];
     unsigned long messungAnzahl;
+    
+    int raceState;
+    int ballsSecondPass;
+    
+    int startRichtungMode;
+    int kugelnSeitReset;
+    bool aussortierenAktiv;
+    int streckenMode; // 0=Manuell, 1=Aussortieren, 2=Rampe, 3=Looping, 4=Gerade, 5=Zufall, 6=Gleichmaessig
 
     unsigned long loopStartMs;
     unsigned long roehreStartMs;
-    unsigned long loopSchaltungen;
-    unsigned long roehreSchaltungen;
-    unsigned long servoSchaltungen;
 };
 
 namespace WebVisu {
+    enum RaceState {
+        RACE_IDLE,
+        RACE_RUNNING,
+        RACE_FINISHED
+    };
+    
     enum Command {
         CMD_NONE,
         CMD_LOOP_TOGGLE,
@@ -49,10 +60,17 @@ namespace WebVisu {
         CMD_SERVO_TOGGLE,
         CMD_AUFZUG_TOGGLE,
         CMD_LAMP_TOGGLE,
-        CMD_ALL_STOP
+        CMD_ALL_STOP,
+        CMD_RACE_START,
+        CMD_RACE_RESET,
+        CMD_STARTRICHTUNG_SET,
+        CMD_RESET_STATS,
+        CMD_TOGGLE_AUSSORTIEREN,
+        CMD_STRECKE_SET
     };
 
     void begin(const char* ssid, const char* pass);
     void update(const WebVisuState& state);
     Command consumeCommand();
+    int consumeCommandArg();
 }

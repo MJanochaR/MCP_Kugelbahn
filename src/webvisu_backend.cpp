@@ -8,6 +8,7 @@
 namespace {
     WiFiServer server(80);
     WebVisu::Command pendingCommand = WebVisu::CMD_NONE;
+    int pendingCommandArg = 0;
     WebVisuState lastState = {};
 
     bool serverStarted = false;
@@ -52,7 +53,10 @@ namespace {
 
     bool isWifiActive() {
         int status = WiFi.status();
-        return (status == WL_CONNECTED || status == WL_AP_LISTENING);
+        // Fallback: If IP is not 0.0.0.0, we are connected or listening
+        IPAddress ip = WiFi.localIP();
+        bool hasIP = (ip[0] != 0);
+        return (status == WL_CONNECTED || status == WL_AP_LISTENING || status == WL_AP_CONNECTED || (WIFI_AP_MODE && hasIP));
     }
 
     void printWebVisuStatus(const char* message, bool force = false) {
@@ -102,6 +106,11 @@ namespace {
     }
 
     void connectWifi(const char* ssid, const char* pass) {
+        if (!WIFI_AP_MODE) {
+            WiFi.disconnect();
+            delay(1000); // Dem Modul Zeit zum Zurücksetzen geben
+        }
+
         if (WIFI_AP_MODE) {
             if (WIFI_USE_STATIC_IP) {
                 WiFi.config(WIFI_LOCAL_IP, WIFI_LOCAL_IP, WIFI_SUBNET);
@@ -113,7 +122,11 @@ namespace {
                 Serial.println("WebVisu Warning: WPA2 erfordert mind. 8 Zeichen. AP-Passwort wird auf '12345678' gesetzt.");
                 WiFi.beginAP(ssid, "12345678");
             } else {
-                WiFi.beginAP(ssid, pass);
+                int result = WiFi.beginAP(ssid, pass);
+                if (result != WL_AP_LISTENING) {
+                    Serial.print("AP Start Fehler-Code: ");
+                    Serial.println(result);
+                }
             }
         } else {
             configureWifi();
@@ -134,7 +147,6 @@ namespace {
         if (now - lastReconnectMs < WIFI_RECONNECT_MS) return;
 
         lastReconnectMs = now;
-        WiFi.disconnect();
         connectWifi(WIFI_SSID, WIFI_PASS);
     }
 
@@ -172,8 +184,6 @@ namespace {
     void sendJson(WiFiClient& client) {
         sendHeader(client, "200 OK", "application/json; charset=utf-8");
         client.print('{');
-        client.print("\"wifi\":"); client.print(onOff(lastState.wifiConnected)); client.print(',');
-        client.print("\"ip\":\""); client.print(lastState.ip); client.print("\",");
         client.print("\"uptimeMs\":"); client.print(lastState.uptimeMs); client.print(',');
         client.print("\"kugeln\":[");
         for(int i=0; i<3; i++) {
@@ -187,6 +197,12 @@ namespace {
         }
         client.print("],");
         client.print("\"messungAnzahl\":"); client.print(lastState.messungAnzahl); client.print(',');
+        client.print("\"raceState\":"); client.print(lastState.raceState); client.print(',');
+        client.print("\"ballsSecondPass\":"); client.print(lastState.ballsSecondPass); client.print(',');
+        client.print("\"aussortierenAktiv\":"); client.print(onOff(lastState.aussortierenAktiv)); client.print(',');
+        client.print("\"startRichtungMode\":"); client.print(lastState.startRichtungMode); client.print(',');
+        client.print("\"streckenMode\":"); client.print(lastState.streckenMode); client.print(',');
+        client.print("\"kugelnSeitReset\":"); client.print(lastState.kugelnSeitReset); client.print(',');
         client.print("\"loopStartMs\":"); client.print(lastState.loopStartMs); client.print(',');
         client.print("\"roehreStartMs\":"); client.print(lastState.roehreStartMs); client.print(',');
         client.print("\"aufzugAktiv\":"); client.print(onOff(lastState.aufzugAktiv)); client.print(',');
@@ -203,20 +219,41 @@ namespace {
         client.print("\"taster3\":"); client.print(onOff(lastState.taster3)); client.print(',');
         client.print("\"schalterLinks\":"); client.print(onOff(lastState.schalterLinks)); client.print(',');
         client.print("\"lichtschrankeOben\":"); client.print(onOff(lastState.lichtschrankeOben)); client.print(',');
-        client.print("\"lichtschrankeUnten\":"); client.print(onOff(lastState.lichtschrankeUnten)); client.print(',');
-        client.print("\"loopSchaltungen\":"); client.print(lastState.loopSchaltungen); client.print(',');
-        client.print("\"roehreSchaltungen\":"); client.print(lastState.roehreSchaltungen); client.print(',');
-        client.print("\"servoSchaltungen\":"); client.print(lastState.servoSchaltungen);
+        client.print("\"lichtschrankeUnten\":"); client.print(onOff(lastState.lichtschrankeUnten));
         client.print('}');
     }
 
     void rememberCommand(const String& requestLine) {
         if (requestLine.indexOf("do=loop") >= 0) pendingCommand = WebVisu::CMD_LOOP_TOGGLE;
         else if (requestLine.indexOf("do=roehre") >= 0) pendingCommand = WebVisu::CMD_ROEHRE_TOGGLE;
+        else if (requestLine.indexOf("do=startrichtung_set") >= 0) {
+            pendingCommand = WebVisu::CMD_STARTRICHTUNG_SET;
+            int posIdx = requestLine.indexOf("mode=");
+            if (posIdx >= 0) {
+                int endIdx = requestLine.indexOf(' ', posIdx);
+                if (endIdx < 0) endIdx = requestLine.indexOf('&', posIdx);
+                if (endIdx < 0) endIdx = requestLine.length();
+                pendingCommandArg = requestLine.substring(posIdx + 5, endIdx).toInt();
+            }
+        }
         else if (requestLine.indexOf("do=servo") >= 0) pendingCommand = WebVisu::CMD_SERVO_TOGGLE;
         else if (requestLine.indexOf("do=aufzug") >= 0) pendingCommand = WebVisu::CMD_AUFZUG_TOGGLE;
         else if (requestLine.indexOf("do=lamp") >= 0) pendingCommand = WebVisu::CMD_LAMP_TOGGLE;
         else if (requestLine.indexOf("do=stop") >= 0) pendingCommand = WebVisu::CMD_ALL_STOP;
+        else if (requestLine.indexOf("do=race_start") >= 0) pendingCommand = WebVisu::CMD_RACE_START;
+        else if (requestLine.indexOf("do=race_reset") >= 0) pendingCommand = WebVisu::CMD_RACE_RESET;
+        else if (requestLine.indexOf("do=reset_stats") >= 0) pendingCommand = WebVisu::CMD_RESET_STATS;
+        else if (requestLine.indexOf("do=toggle_aussortieren") >= 0) pendingCommand = WebVisu::CMD_TOGGLE_AUSSORTIEREN;
+        else if (requestLine.indexOf("do=strecke_set") >= 0) {
+            pendingCommand = WebVisu::CMD_STRECKE_SET;
+            int posIdx = requestLine.indexOf("mode=");
+            if (posIdx > 0) {
+                int endIdx = requestLine.indexOf(' ', posIdx);
+                if (endIdx < 0) endIdx = requestLine.indexOf('&', posIdx);
+                if (endIdx < 0) endIdx = requestLine.length();
+                pendingCommandArg = requestLine.substring(posIdx + 5, endIdx).toInt();
+            }
+        }
     }
 
     void skipHeaders(WiFiClient& client) {
@@ -309,6 +346,12 @@ Command consumeCommand() {
     Command command = pendingCommand;
     pendingCommand = CMD_NONE;
     return command;
+}
+
+int consumeCommandArg() {
+    int arg = pendingCommandArg;
+    pendingCommandArg = 0;
+    return arg;
 }
 
 }
