@@ -48,24 +48,26 @@ button.stop{background:#b42318}
  <div class="card"><div class="muted">Rennenstatus</div><div id="rennen" class="big">...</div></div>
 </div>
 
-<h2>Aktoren</h2>
+<h2>Manuelle Steuerung</h2>
+
+<h3>Aktoren</h3>
 <div class="grid">
  <div class="card">
-   <h3>Motor Loop</h3>
+   <h4>Motor Loop</h4>
    <p>Stellung: <span id="loopR" class="value"></span></p>
    <div class="bar"><span id="loopBar"></span></div>
    <button onclick="cmd('loop')">Loop schalten</button>
  </div>
 
  <div class="card">
-   <h3>Motor Röhre</h3>
+   <h4>Motor Röhre</h4>
    <p>Stellung: <span id="roehreR" class="value"></span></p>
    <div class="bar"><span id="roehreBar"></span></div>
    <button onclick="cmd('roehre')">Röhre schalten</button>
  </div>
 
   <div class="card">
-    <h3>Servo Röhre</h3>
+    <h4>Servo Röhre</h4>
     <p>Stellung: <span id="servo" class="value"></span></p>
     <button onclick="cmd('servo')">Servo umschalten</button>
     <hr style="border:0; border-top:1px solid #ccc; margin:5px 0;">
@@ -73,7 +75,17 @@ button.stop{background:#b42318}
   </div>
 
  <div class="card">
-   <h3>Startrichtung</h3>
+   <h4>Aufzug</h4>
+   <p>Status: <span id="aufzug" class="value"></span></p>
+   <button onclick="cmd('aufzug')">Aufzug umschalten</button>
+ </div>
+
+</div>
+
+<h3>Streckeneinstellung</h3>
+<div class="grid">
+ <div class="card">
+   <h4>Startrichtung</h4>
    <p>Aktueller Modus: <span id="startMode" class="value"></span></p>
    <div style="display:flex; flex-direction:column; gap:8px; margin-top:10px;">
      <button onclick="setStartMode(0)">Alternierend</button>
@@ -83,7 +95,7 @@ button.stop{background:#b42318}
  </div>
 
  <div class="card">
-   <h3>Strecken</h3>
+   <h4>Strecken</h4>
    <p>Aktuelle Strecke: <span id="streckeMode" class="value"></span></p>
    <div style="display:flex; flex-direction:column; gap:8px; margin-top:10px;">
      <button onclick="setStrecke(1)">Aussortieren</button>
@@ -95,24 +107,11 @@ button.stop{background:#b42318}
      <button onclick="setStrecke(6)">Gleichmäßig</button>
    </div>
  </div>
-
- <div class="card">
-   <h3>Aufzug</h3>
-   <p>Status: <span id="aufzug" class="value"></span></p>
-   <button onclick="cmd('aufzug')">Aufzug umschalten</button>
- </div>
-
- <div class="card">
-   <h3>NotAus</h3>
-   <button class="stop" onclick="cmd('stop')">Alles stoppen</button>
- </div>
 </div>
 
-<h2>Zeitmessung & Rennen</h2>
+<h2>Rennen</h2>
 <div class="grid">
- <div class="card">
-    <h3>Rennen</h3>
-    <p>Status: <b id="raceState"></b></p>
+ <div class="card" style="grid-column: span 2;">
     <div id="raceWinnerBox" style="display:none;" class="winner"></div>
     <button onclick="cmd('race_start')">Rennen starten</button>
     <button onclick="cmd('race_reset')">Rennen zurücksetzen</button>
@@ -266,7 +265,7 @@ async function load(){
     $('aussortiertCount').textContent = d.aussortierteKugelnGesamt !== undefined ? d.aussortierteKugelnGesamt : 0;
     
     if (d.alltimeFastestMs !== undefined && d.alltimeFastestMs < 4000000000) {
-      $('alltimeFastest').textContent = zeit(d.alltimeFastestMs) + ' auf ' + streckenStrs[d.alltimeFastestStrecke];
+      $('alltimeFastest').textContent = 'Zeit: ' + zeit(d.alltimeFastestMs) + ' : ' + streckenStrs[d.alltimeFastestStrecke];
     } else {
       $('alltimeFastest').textContent = '-';
     }

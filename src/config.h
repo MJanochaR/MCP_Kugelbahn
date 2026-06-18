@@ -61,7 +61,7 @@ const int SERVOSTART_LINKS = 150;
 
 // Rennen
 const unsigned long DELAY_AUFZUG_STOP_MS = 1400;
-const unsigned long DELAY_LED_GREEN_MS = 2000;
+const unsigned long DELAY_LED_GREEN_MS = 2400;
 const unsigned long SERVO_RELEASE_DELAY_MS = 5000;
 const unsigned long SERVO_OPEN3BALL_MS = 155;
 const unsigned long SERVO_OPEN2BALL_MS = 160;
