@@ -50,8 +50,10 @@ struct Anlage {
   bool servoStartIstRechts = true;
 
   bool aussortierenAktiv = false;
-  bool ledFarbeToggle = false;
+  bool ledFarbeToggle = true;
   bool warteAufSchockSensorGruen = false;
+  unsigned long schockGruenFreigabeMs = 0;
+  bool schockGruenFreigabeGemeldet = false;
   unsigned long aufzugStopMs = 0;
 
   // Servo Auslass Queue
@@ -292,15 +294,15 @@ void updateLichtschranken(unsigned long jetzt) {
             // Servo zu (Sammlung beginnt)
             anlage.servoAuf = false;
             Actuators::setServoWinkel(SERVROEHRE_ZU);
+            
+            // LED auf Farbe 1 (Rot) stellen
+            anlage.ledFarbeToggle = false;
           }
           if (anlage.raceBallsStarted == 6) {
             // 3. Kugel zum 2. Mal oben → Aufzug stoppen und Auslass starten
             anlage.aufzugStopMs = jetzt + DELAY_AUFZUG_STOP_MS;
             anlage.servoReleasePhase = 1;
             anlage.servoReleaseNextMs = jetzt + SERVO_RELEASE_DELAY_MS;
-            
-            // LED auf Farbe 1 (Rot) stellen
-            anlage.ledFarbeToggle = false;
 
             Serial.print("6 Kugeln erkannt. Aufzug stoppt in ");
             Serial.print(DELAY_AUFZUG_STOP_MS);
@@ -437,6 +439,7 @@ void updateRaceTasks(unsigned long jetzt) {
 
       if (kugelIdx == 2) {
         anlage.warteAufSchockSensorGruen = true;
+        anlage.schockGruenFreigabeMs = jetzt + DELAY_LED_GREEN_MS;
       }
       break;
     }
@@ -475,6 +478,9 @@ void resetRace() {
   anlage.servoReleasePhase = 0;
   anlage.servoReleaseNextMs = 0;
   anlage.warteAufSchockSensorGruen = false;
+  anlage.schockGruenFreigabeMs = 0;
+  anlage.schockGruenFreigabeGemeldet = false;
+  anlage.ledFarbeToggle = true;
 }
 
 void updateWebCommand(unsigned long jetzt) {
@@ -633,12 +639,17 @@ void shockISR() {
 }
 
 void updateShocksensor(unsigned long jetzt) {
+  if (anlage.warteAufSchockSensorGruen && !anlage.schockGruenFreigabeGemeldet && jetzt >= anlage.schockGruenFreigabeMs) {
+    Serial.println("Schocksensor ist jetzt BEREIT fuer die letzte Kugel (Timer abgelaufen).");
+    anlage.schockGruenFreigabeGemeldet = true;
+  }
+
   if (shockFlankeErkannt) {
     shockFlankeErkannt = false;
     static unsigned long lastShockMs = 0;
     if (jetzt - lastShockMs >= SHOCKSENSOR_DEBOUNCE_MS) {
       lastShockMs = jetzt;
-      if (anlage.warteAufSchockSensorGruen) {
+      if (anlage.warteAufSchockSensorGruen && jetzt >= anlage.schockGruenFreigabeMs) {
         Serial.println("Shocksensor Flanke erkannt - Letzte Kugel durch! LED Gruen!");
         anlage.ledFarbeToggle = true; // Farbe 2 (Grün)
         anlage.warteAufSchockSensorGruen = false;
