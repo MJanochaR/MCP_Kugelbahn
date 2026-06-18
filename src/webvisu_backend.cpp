@@ -202,6 +202,7 @@ namespace {
         client.print("\"aussortierenAktiv\":"); client.print(onOff(lastState.aussortierenAktiv)); client.print(',');
         client.print("\"startRichtungMode\":"); client.print(lastState.startRichtungMode); client.print(',');
         client.print("\"streckenMode\":"); client.print(lastState.streckenMode); client.print(',');
+        client.print("\"raceStreckenMode\":"); client.print(lastState.raceStreckenMode); client.print(',');
         client.print("\"kugelnSeitReset\":"); client.print(lastState.kugelnSeitReset); client.print(',');
         client.print("\"loopStartMs\":"); client.print(lastState.loopStartMs); client.print(',');
         client.print("\"roehreStartMs\":"); client.print(lastState.roehreStartMs); client.print(',');
@@ -213,6 +214,8 @@ namespace {
         client.print("\"roehreRichtung\":"); client.print(onOff(lastState.roehreRichtung)); client.print(',');
         client.print("\"servoAuf\":"); client.print(onOff(lastState.servoAuf)); client.print(',');
         client.print("\"lampenAn\":"); client.print(onOff(lastState.lampenAn)); client.print(',');
+
+
         client.print("\"taster0\":"); client.print(onOff(lastState.taster0)); client.print(',');
         client.print("\"taster1\":"); client.print(onOff(lastState.taster1)); client.print(',');
         client.print("\"taster2\":"); client.print(onOff(lastState.taster2)); client.print(',');
@@ -221,6 +224,17 @@ namespace {
         client.print("\"lichtschrankeOben\":"); client.print(onOff(lastState.lichtschrankeOben)); client.print(',');
         client.print("\"lichtschrankeUnten\":"); client.print(onOff(lastState.lichtschrankeUnten));
         client.print('}');
+    }
+
+    void parseArg(const String& req, WebVisu::Command cmd, const char* key) {
+        pendingCommand = cmd;
+        int posIdx = req.indexOf(key);
+        if (posIdx > 0) {
+            int endIdx = req.indexOf(' ', posIdx);
+            if (endIdx < 0) endIdx = req.indexOf('&', posIdx);
+            if (endIdx < 0) endIdx = req.length();
+            pendingCommandArg = req.substring(posIdx + strlen(key), endIdx).toInt();
+        }
     }
 
     void rememberCommand(const String& requestLine) {
@@ -244,16 +258,10 @@ namespace {
         else if (requestLine.indexOf("do=race_reset") >= 0) pendingCommand = WebVisu::CMD_RACE_RESET;
         else if (requestLine.indexOf("do=reset_stats") >= 0) pendingCommand = WebVisu::CMD_RESET_STATS;
         else if (requestLine.indexOf("do=toggle_aussortieren") >= 0) pendingCommand = WebVisu::CMD_TOGGLE_AUSSORTIEREN;
-        else if (requestLine.indexOf("do=strecke_set") >= 0) {
-            pendingCommand = WebVisu::CMD_STRECKE_SET;
-            int posIdx = requestLine.indexOf("mode=");
-            if (posIdx > 0) {
-                int endIdx = requestLine.indexOf(' ', posIdx);
-                if (endIdx < 0) endIdx = requestLine.indexOf('&', posIdx);
-                if (endIdx < 0) endIdx = requestLine.length();
-                pendingCommandArg = requestLine.substring(posIdx + 5, endIdx).toInt();
-            }
-        }
+        else if (requestLine.indexOf("do=test_release") >= 0) pendingCommand = WebVisu::CMD_TEST_RELEASE;
+        else if (requestLine.indexOf("do=race_strecke_set") >= 0) parseArg(requestLine, WebVisu::CMD_RACE_STRECKE_SET, "mode=");
+        else if (requestLine.indexOf("do=strecke_set") >= 0) parseArg(requestLine, WebVisu::CMD_STRECKE_SET, "mode=");
+
     }
 
     void skipHeaders(WiFiClient& client) {

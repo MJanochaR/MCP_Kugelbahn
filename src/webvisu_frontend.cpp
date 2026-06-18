@@ -35,7 +35,7 @@ button.stop{background:#b42318}
 .value{font-size:18px;font-weight:700}
 .bar{height:10px;background:#e5e7eb;border-radius:999px;overflow:hidden}
 .bar>span{display:block;height:100%;background:#1f6feb;width:0%}
-pre{background:#111827;color:#e5e7eb;padding:12px;border-radius:12px;overflow:auto}
+.winner{color:#16803c;font-weight:700;font-size:18px;margin:10px 0;padding:10px;background:#e6f9ec;border-radius:12px}
 </style>
 </head>
 <body>
@@ -64,11 +64,13 @@ pre{background:#111827;color:#e5e7eb;padding:12px;border-radius:12px;overflow:au
    <button onclick="cmd('roehre')">Röhre schalten</button>
  </div>
 
- <div class="card">
-   <h3>Servo Röhre</h3>
-   <p>Stellung: <span id="servo" class="value"></span></p>
-   <button onclick="cmd('servo')">Servo umschalten</button>
- </div>
+  <div class="card">
+    <h3>Servo Röhre</h3>
+    <p>Stellung: <span id="servo" class="value"></span></p>
+    <button onclick="cmd('servo')">Servo umschalten</button>
+    <hr style="border:0; border-top:1px solid #ccc; margin:5px 0;">
+    <button onclick="cmd('test_release')">Auslass-Sequenz testen</button>
+  </div>
 
  <div class="card">
    <h3>Startrichtung</h3>
@@ -106,15 +108,26 @@ pre{background:#111827;color:#e5e7eb;padding:12px;border-radius:12px;overflow:au
  </div>
 </div>
 
- <h2>Zeitmessung & Rennen</h2>
- <div class="grid">
-  <div class="card">
+<h2>Zeitmessung & Rennen</h2>
+<div class="grid">
+ <div class="card">
     <h3>Rennen</h3>
+    <p>Status: <b id="raceState"></b></p>
+    <div id="raceWinnerBox" style="display:none;" class="winner"></div>
     <button onclick="cmd('race_start')">Rennen starten</button>
     <button onclick="cmd('race_reset')">Rennen zurücksetzen</button>
     <div style="margin-top: 10px;">
       <p style="margin: 5px 0;"><b>Aussortieren-Logik: </b><span id="aussortierenState" class="value"></span></p>
       <button onclick="cmd('toggle_aussortieren')">Aussortieren Umschalten</button>
+    </div>
+
+    <div style="margin-top: 10px;">
+      <p style="margin: 5px 0;"><b>Strecke im Rennen: </b><span id="raceStreckeState" class="value"></span></p>
+      <button onclick="cmd('race_strecke_set&mode=2')">Rampe</button>
+      <button onclick="cmd('race_strecke_set&mode=3')">Looping</button>
+      <button onclick="cmd('race_strecke_set&mode=4')">Gerade</button>
+      <button onclick="cmd('race_strecke_set&mode=5')">Zufall</button>
+      <button onclick="cmd('race_strecke_set&mode=6')">Gleichmäßig</button>
     </div>
     
     <h3 style="margin-top: 20px;">Kugelzeiten</h3>
@@ -199,7 +212,28 @@ async function load(){
     $('roehreBar').style.width = d.roehreAktiv ? Math.min(100, (d.uptimeMs - d.roehreStartMs) / MOTOR_RUN_MS * 100) + '%' : '0%';
 
     $('servo').textContent = d.servoAuf ? 'AUF' : 'ZU';
+
     $('aussortierenState').textContent = d.aussortierenAktiv ? 'Aktiviert' : 'Deaktiviert';
+
+    // Gewinner anzeigen
+    let allFinished = d.kugeln[0].abgeschlossen && d.kugeln[1].abgeschlossen && d.kugeln[2].abgeschlossen;
+    if (allFinished) {
+      let bestIdx = 0;
+      let bestTime = d.kugeln[0].dauerMs;
+      for (let i = 1; i < 3; i++) {
+        if (d.kugeln[i].dauerMs < bestTime) {
+          bestTime = d.kugeln[i].dauerMs;
+          bestIdx = i;
+        }
+      }
+      $('raceWinnerBox').style.display = 'block';
+      $('raceWinnerBox').textContent = '🏆 Gewinner: Kugel ' + (bestIdx + 1) + ' (' + (bestTime / 1000).toFixed(3) + ' s)';
+    } else {
+      $('raceWinnerBox').style.display = 'none';
+    }
+
+    let raceModeStrs = ['?', 'Aussortieren', 'Rampe', 'Looping', 'Gerade', 'Zufall', 'Gleichmäßig'];
+    $('raceStreckeState').textContent = d.raceStreckenMode !== undefined ? raceModeStrs[d.raceStreckenMode] : '?';
     
     let modeStrs = ['Alternierend', 'Immer Rechts', 'Immer Links'];
     $('startMode').textContent = d.startRichtungMode !== undefined ? modeStrs[d.startRichtungMode] : '?';
@@ -210,7 +244,6 @@ async function load(){
     let html = '';
     if (d.kugeln) {
       d.kugeln.forEach((k, idx) => {
-        let status = k.aktiv ? 'Läuft' : (k.abgeschlossen ? 'Abgeschlossen' : 'Bereit');
         let dauer = k.aktiv ? zeit(d.uptimeMs - k.startMs) : (k.abgeschlossen ? zeit(k.dauerMs) : '-');
         html += `<tr><td>Kugel ${idx + 1}</td><td>${k.startMs ? ms(k.startMs) : '-'}</td><td>${k.endMs ? ms(k.endMs) : '-'}</td><td>${dauer}</td></tr>`;
       });

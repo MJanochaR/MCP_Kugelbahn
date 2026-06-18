@@ -51,17 +51,19 @@ const unsigned long BUTTON_DEBOUNCE_MS = 50;
 // Sensoren
 const int LICHTSCHRANKE_ADC_SCHWELLE = 100;
 const unsigned long LICHTSCHRANKE_DEBOUNCE_MS = 20;
+const unsigned long SHOCKSENSOR_DEBOUNCE_MS = 500;
 
 // Servostellungen
 const int SERVROEHRE_AUF = 56;
-const int SERVROEHRE_ZU = 84;
+const int SERVROEHRE_ZU = 66;
 const int SERVOSTART_RECHTS = 68;
 const int SERVOSTART_LINKS = 150;
 
 // Rennen
-const unsigned long DELAY_AUFZUG_STOP_MS = 1000;
-const unsigned long SERVO_RELEASE_DELAY_MS = 3000;
-const unsigned long SERVO_OPEN3BALL_MS = 90;
-const unsigned long SERVO_OPEN2BALL_MS = 100;
-const unsigned long SERVO_OPEN1BALL_MS = 120;
-const unsigned long SERVO_WAIT_MS = 5000;
+const unsigned long DELAY_AUFZUG_STOP_MS = 2000;
+const unsigned long SERVO_RELEASE_DELAY_MS = 4000;
+const unsigned long SERVO_OPEN3BALL_MS = 155;
+const unsigned long SERVO_OPEN2BALL_MS = 170;
+const unsigned long SERVO_OPEN1BALL_MS = 500;
+const unsigned long SERVO_WAIT_MS = 3000;
+const unsigned long DELAY_KUGEL_BIS_WEICHE_MS = 2000;

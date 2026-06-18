@@ -34,46 +34,44 @@ struct Anlage {
   unsigned long messungAnzahl = 0;
 
   WebVisu::RaceState raceState = WebVisu::RACE_IDLE;
-  int ballsStarted = 0;
-  int ballsFinished = 0;
-  int ballsSecondPass = 0;
-  
+  int raceBallsStarted = 0;
+  int raceBallsFinished = 0;
+  int raceBallsSecondPass = 0;
+
   int startRichtungMode = 0; // 0=Alternating, 1=Rechts, 2=Links
-  int streckenMode = 0; // 0=Manuell, 1=Aussortieren, 2=Rampe, 3=Looping, 4=Gerade, 5=Zufall, 6=Gleichmaessig
+  int streckenMode = 0;      // 0=Manuell, 1=Aussortieren, 2=Rampe, 3=Looping,
+                             // 4=Gerade, 5=Zufall, 6=Gleichmaessig
+  int raceStreckenMode = 5;  // 5=Zufall, 6=Gleichmaessig
+  
+  // Gesamtkugeln
   int kugelnSeitReset = 0;
+  int kugelnUntenSeitReset = 0;
+  
   bool servoStartIstRechts = true;
-  
+
   bool aussortierenAktiv = false;
+  bool ledFarbeToggle = false;
   unsigned long aufzugStopMs = 0;
-  
+
   // Servo Auslass Queue
-  int servoReleasePhase = 0; // 0=Idle, 1=Wait5s, 2=Auf1, 3=Zu1, 4=Wait3s, 5=Auf2, 6=Zu2, 7=Wait3s, 8=Auf3, 9=Zu3/Done
+  // Auslass-Sequenz: 0=Idle, 1=Strecke0+Auf, 2=Zu, 3=Strecke1, 4=Auf, 5=Zu,
+  // 6=Strecke2, 7=Auf, 8=Zu/Done
+  int servoReleasePhase = 0;
   unsigned long servoReleaseNextMs = 0;
+
+  unsigned long time3Ball = SERVO_OPEN3BALL_MS;
+  unsigned long time2Ball = SERVO_OPEN2BALL_MS;
+  unsigned long time1Ball = SERVO_OPEN1BALL_MS;
+  int servoAufWinkel = SERVROEHRE_AUF;
+  int servoZuWinkel = SERVROEHRE_ZU;
+  int winnerIndex = 0;
 } anlage;
 
 WebVisuState::KugelData kugelHistorie[3] = {};
 
 bool aktivLow(int pin) { return digitalRead(pin) == LOW; }
 
-void printUptime(unsigned long jetzt) {
-  unsigned long totalSeconds = jetzt / 1000;
-  unsigned long hours = totalSeconds / 3600;
-  unsigned long minutes = (totalSeconds / 60) % 60;
-  unsigned long seconds = totalSeconds % 60;
-
-  if (hours < 10)
-    Serial.print('0');
-  Serial.print(hours);
-  Serial.print(':');
-  if (minutes < 10)
-    Serial.print('0');
-  Serial.print(minutes);
-  Serial.print(':');
-  if (seconds < 10)
-    Serial.print('0');
-  Serial.print(seconds);
-  Serial.print(' ');
-}
+// (printUptime entfernt - ist in webvisu_backend.cpp vorhanden)
 
 void printLichtschranke(const char *name, int kugelNummer) {
   Serial.print("LS ");
@@ -91,8 +89,8 @@ void setLampen(bool an) {
   Actuators::setLampen(an);
 }
 
-void schalteMotor(bool &aktiv, bool &richtung, unsigned long &startMs,
-                  int pinR, int pinG, unsigned long jetzt) {
+void schalteMotor(bool &aktiv, bool &richtung, unsigned long &startMs, int pinR,
+                  int pinG, unsigned long jetzt) {
   richtung = !richtung;
   aktiv = true;
   startMs = jetzt;
@@ -111,7 +109,8 @@ void schalteRoehre(unsigned long jetzt) {
 
 void schalteServo() {
   anlage.servoAuf = !anlage.servoAuf;
-  Actuators::setServoWinkel(anlage.servoAuf ? SERVROEHRE_AUF : SERVROEHRE_ZU);
+  Actuators::setServoWinkel(anlage.servoAuf ? anlage.servoAufWinkel
+                                            : anlage.servoZuWinkel);
 }
 
 void schalteAufzug() {
@@ -167,105 +166,110 @@ void updateTaster(unsigned long jetzt) {
 }
 
 void setStreckeIntern(int typ, unsigned long jetzt) {
-  if (!(anlage.raceState == WebVisu::RACE_RUNNING && anlage.aussortierenAktiv)) {
+  // Servo NICHT öffnen wenn Release-Sequenz läuft ODER Aussortieren-Sammlung
+  // aktiv
+  bool releaseAktiv = anlage.servoReleasePhase > 0;
+  bool sammlung =
+      (anlage.raceState == WebVisu::RACE_RUNNING && anlage.aussortierenAktiv);
+  if (!releaseAktiv && !sammlung) {
     anlage.servoAuf = true;
-    Actuators::setServoWinkel(SERVROEHRE_AUF);
+    Actuators::setServoWinkel(anlage.servoAufWinkel);
   }
 
-  switch(typ) {
-    case 1: // Aussortieren
-      anlage.servoStartIstRechts = false;
-      Actuators::setServoStartWinkel(SERVOSTART_LINKS);
-      anlage.roehreRichtung = true;
-      anlage.roehreAktiv = true;
-      anlage.roehreStartMs = jetzt;
-      Actuators::setMotor(PIN_R_MROEHRE, PIN_G_MROEHRE, anlage.roehreRichtung);
-      break;
-    case 2: // Rampe
-      anlage.servoStartIstRechts = false;
-      Actuators::setServoStartWinkel(SERVOSTART_LINKS);
-      anlage.roehreRichtung = false;
-      anlage.roehreAktiv = true;
-      anlage.roehreStartMs = jetzt;
-      Actuators::setMotor(PIN_R_MROEHRE, PIN_G_MROEHRE, anlage.roehreRichtung);
-      break;
-    case 3: // Looping
-      anlage.servoStartIstRechts = true;
-      Actuators::setServoStartWinkel(SERVOSTART_RECHTS);
-      anlage.loopRichtung = true;
-      anlage.loopAktiv = true;
-      anlage.loopStartMs = jetzt;
-      Actuators::setMotor(PIN_R_MLOOP, PIN_G_MLOOP, anlage.loopRichtung);
-      break;
-    case 4: // Gerade
-      anlage.servoStartIstRechts = true;
-      Actuators::setServoStartWinkel(SERVOSTART_RECHTS);
-      anlage.loopRichtung = false;
-      anlage.loopAktiv = true;
-      anlage.loopStartMs = jetzt;
-      Actuators::setMotor(PIN_R_MLOOP, PIN_G_MLOOP, anlage.loopRichtung);
-      break;
+  switch (typ) {
+  case 1: // Aussortieren
+    anlage.servoStartIstRechts = false;
+    Actuators::setServoStartWinkel(SERVOSTART_LINKS);
+    anlage.roehreRichtung = true;
+    anlage.roehreAktiv = true;
+    anlage.roehreStartMs = jetzt;
+    Actuators::setMotor(PIN_R_MROEHRE, PIN_G_MROEHRE, anlage.roehreRichtung);
+    break;
+  case 2: // Rampe
+    anlage.servoStartIstRechts = false;
+    Actuators::setServoStartWinkel(SERVOSTART_LINKS);
+    anlage.roehreRichtung = false;
+    anlage.roehreAktiv = true;
+    anlage.roehreStartMs = jetzt;
+    Actuators::setMotor(PIN_R_MROEHRE, PIN_G_MROEHRE, anlage.roehreRichtung);
+    break;
+  case 3: // Looping
+    anlage.servoStartIstRechts = true;
+    Actuators::setServoStartWinkel(SERVOSTART_RECHTS);
+    anlage.loopRichtung = true;
+    anlage.loopAktiv = true;
+    anlage.loopStartMs = jetzt;
+    Actuators::setMotor(PIN_R_MLOOP, PIN_G_MLOOP, anlage.loopRichtung);
+    break;
+  case 4: // Gerade
+    anlage.servoStartIstRechts = true;
+    Actuators::setServoStartWinkel(SERVOSTART_RECHTS);
+    anlage.loopRichtung = false;
+    anlage.loopAktiv = true;
+    anlage.loopStartMs = jetzt;
+    Actuators::setMotor(PIN_R_MLOOP, PIN_G_MLOOP, anlage.loopRichtung);
+    break;
   }
 }
 
 void updateLichtschranken(unsigned long jetzt) {
   if (lichtschrankeOben.triggered()) {
-    anlage.kugelnSeitReset++;
-    
-    int printKugelNummer = ((anlage.kugelnSeitReset - 1) % 3) + 1;
+    anlage.kugelnSeitReset++; // Globale Statistik
+
+    int printKugelNummer = (anlage.raceState == WebVisu::RACE_RUNNING) ? ((anlage.raceBallsStarted % 3) + 1) : (((anlage.kugelnSeitReset - 1) % 3) + 1);
     printLichtschranke("Oben", printKugelNummer);
 
     if (anlage.anlageScharf) {
-      if (anlage.streckenMode == 0) { // Manuell
+      if (anlage.streckenMode == 0) {        // Manuell
         if (anlage.startRichtungMode == 0) { // Alternierend
           anlage.servoStartIstRechts = !anlage.servoStartIstRechts;
-          Actuators::setServoStartWinkel(anlage.servoStartIstRechts ? SERVOSTART_RECHTS : SERVOSTART_LINKS);
+          Actuators::setServoStartWinkel(anlage.servoStartIstRechts
+                                             ? SERVOSTART_RECHTS
+                                             : SERVOSTART_LINKS);
         }
       } else if (anlage.streckenMode == 5) { // Zufall
-        int r = random(2, 5); // 2, 3, 4
+        int r = random(2, 5);                // 2, 3, 4
         setStreckeIntern(r, jetzt);
       } else if (anlage.streckenMode == 6) { // Gleichmäßig
         static int lastGleich = 1;
         lastGleich++;
-        if (lastGleich > 4) lastGleich = 2;
+        if (lastGleich > 4)
+          lastGleich = 2;
         setStreckeIntern(lastGleich, jetzt);
       }
 
-      // Zeitmessung starten
-      int idx = anlage.ballsStarted % 3;
-      kugelHistorie[idx].startMs = jetzt;
-      kugelHistorie[idx].endMs = 0;
-      kugelHistorie[idx].dauerMs = 0;
-      kugelHistorie[idx].aktiv = true;
-      kugelHistorie[idx].abgeschlossen = false;
-      
-      anlage.ballsStarted++; // Immer hochzählen, resetRace setzt es auf 0
-
       // Rennen-Logik
       if (anlage.raceState == WebVisu::RACE_RUNNING) {
-        
+        // Zeitmessung starten (Nur für die ersten 3 Kugeln im Rennen)
+        if (anlage.raceBallsStarted < 3) {
+          int idx = anlage.raceBallsStarted;
+          kugelHistorie[idx].startMs = jetzt;
+          kugelHistorie[idx].endMs = 0;
+          kugelHistorie[idx].dauerMs = 0;
+          kugelHistorie[idx].aktiv = true;
+          kugelHistorie[idx].abgeschlossen = false;
+        }
+
+        anlage.raceBallsStarted++;
+
         if (!anlage.aussortierenAktiv) {
           // Aussortieren AUS
-          if (anlage.ballsStarted == 3) {
-             anlage.aufzugStopMs = jetzt + DELAY_AUFZUG_STOP_MS;
-             anlage.raceState = WebVisu::RACE_FINISHED;
+          if (anlage.raceBallsStarted == 3) {
+            anlage.aufzugStopMs = jetzt + DELAY_AUFZUG_STOP_MS;
+            // Wir setzen RACE_FINISHED hier nicht mehr sofort, sondern warten, bis Kugeln unten ankommen (oder timeout).
           }
         } else {
           // Aussortieren AN
-          if (anlage.ballsStarted == 4) {
-             // 1. Kugel rollt zum 2. Mal oben durch (Trigger 4)
-             anlage.streckenMode = 1; // Aussortieren
-             setStreckeIntern(1, jetzt);
-             
-             // Jetzt Röhre schließen zum Sammeln
-             anlage.servoAuf = false;
-             Actuators::setServoWinkel(SERVROEHRE_ZU);
+          if (anlage.raceBallsStarted == 4) {
+            // 1. Kugel zum 2. Mal oben → Servo zu (Sammlung beginnt)
+            anlage.servoAuf = false;
+            Actuators::setServoWinkel(SERVROEHRE_ZU);
           }
-          if (anlage.ballsStarted == 6) {
-             // 3. Kugel rollt zum 2. Mal oben durch (Trigger 6) -> auslassen beginnen
-             anlage.aufzugStopMs = jetzt + DELAY_AUFZUG_STOP_MS;
-             anlage.servoReleasePhase = 1;
-             anlage.servoReleaseNextMs = jetzt + SERVO_RELEASE_DELAY_MS;
+          if (anlage.raceBallsStarted == 6) {
+            // 3. Kugel zum 2. Mal oben → Aufzug stoppen und Auslass starten
+            anlage.aufzugStopMs = jetzt + DELAY_AUFZUG_STOP_MS;
+            anlage.servoReleasePhase = 1;
+            anlage.servoReleaseNextMs = jetzt;
           }
         }
       }
@@ -273,29 +277,50 @@ void updateLichtschranken(unsigned long jetzt) {
   }
 
   if (lichtschrankeUnten.triggered()) {
-    if (anlage.ballsFinished < anlage.kugelnSeitReset) {
-      anlage.ballsFinished++;
-      
-      int printKugelNummer = ((anlage.ballsFinished - 1) % 3) + 1;
-      printLichtschranke("Unten", printKugelNummer);
+    anlage.kugelnUntenSeitReset++; // Globale Statistik
 
-      if (anlage.anlageScharf) {
-        if (anlage.ballsFinished <= anlage.ballsStarted) {
-          int idx = (anlage.ballsFinished - 1) % 3;
+    int printKugelNummer = (anlage.raceState == WebVisu::RACE_RUNNING) ? ((anlage.raceBallsFinished % 3) + 1) : (((anlage.kugelnUntenSeitReset - 1) % 3) + 1);
+    printLichtschranke("Unten", printKugelNummer);
+
+    if (anlage.anlageScharf) {
+      if (anlage.raceState == WebVisu::RACE_RUNNING) {
+        // Nur so viele unten zählen, wie oben gestartet sind (oder max 3)
+        if (anlage.raceBallsFinished < anlage.raceBallsStarted && anlage.raceBallsFinished < 3) {
+          int idx = anlage.raceBallsFinished;
+          
           if (kugelHistorie[idx].aktiv) {
             unsigned long dauer = jetzt - kugelHistorie[idx].startMs;
-            
+
             kugelHistorie[idx].endMs = jetzt;
             kugelHistorie[idx].dauerMs = dauer;
             kugelHistorie[idx].aktiv = false;
             kugelHistorie[idx].abgeschlossen = true;
-            
+
             anlage.messungAnzahl++;
+          }
+          anlage.raceBallsFinished++;
+
+          if (!anlage.aussortierenAktiv) {
+            // Rennen ohne Aussortieren: Wenn 3. Kugel unten ist, ist das Rennen fertig
+            if (anlage.raceBallsFinished == 3) {
+              anlage.raceState = WebVisu::RACE_FINISHED;
+            }
+          } else {
+            // Rennen mit Aussortieren: Wenn 3 Kugeln unten sind, Gewinner berechnen
+            if (anlage.raceBallsFinished == 3) {
+              anlage.winnerIndex = 0;
+              unsigned long bestTime = 0xFFFFFFFF;
+              for (int i = 0; i < 3; i++) {
+                if (kugelHistorie[i].dauerMs > 0 &&
+                    kugelHistorie[i].dauerMs < bestTime) {
+                  bestTime = kugelHistorie[i].dauerMs;
+                  anlage.winnerIndex = i;
+                }
+              }
+            }
           }
         }
       }
-    } else {
-      Serial.println("LS Unten: Erkannt");
     }
   }
 }
@@ -310,60 +335,66 @@ void updateRaceTasks(unsigned long jetzt) {
   }
 
   if (anlage.servoReleasePhase > 0 && jetzt >= anlage.servoReleaseNextMs) {
-    switch (anlage.servoReleasePhase) {
-      case 1: // Wait5s passed -> Auf1 (3 Kugeln drin)
-        anlage.servoAuf = true;
-        Actuators::setServoWinkel(SERVROEHRE_AUF);
-        anlage.servoReleasePhase = 2;
-        anlage.servoReleaseNextMs = jetzt + SERVO_OPEN3BALL_MS;
-        break;
-      case 2: // Auf1 passed -> Zu1
-        anlage.servoAuf = false;
-        Actuators::setServoWinkel(SERVROEHRE_ZU);
-        anlage.servoReleasePhase = 3;
-        anlage.servoReleaseNextMs = jetzt + SERVO_WAIT_MS;
-        break;
-      case 3: // Wait3s passed -> Auf2 (2 Kugeln drin)
-        anlage.servoAuf = true;
-        Actuators::setServoWinkel(SERVROEHRE_AUF);
-        anlage.servoReleasePhase = 4;
-        anlage.servoReleaseNextMs = jetzt + SERVO_OPEN2BALL_MS;
-        break;
-      case 4: // Auf2 passed -> Zu2
-        anlage.servoAuf = false;
-        Actuators::setServoWinkel(SERVROEHRE_ZU);
-        anlage.servoReleasePhase = 5;
-        anlage.servoReleaseNextMs = jetzt + SERVO_WAIT_MS;
-        break;
-      case 5: // Wait3s passed -> Auf3 (1 Kugel drin)
-        anlage.servoAuf = true;
-        Actuators::setServoWinkel(SERVROEHRE_AUF);
-        anlage.servoReleasePhase = 6;
-        anlage.servoReleaseNextMs = jetzt + SERVO_OPEN1BALL_MS;
-        break;
-      case 6: // Auf3 passed -> Zu3
-        anlage.servoAuf = false;
-        Actuators::setServoWinkel(SERVROEHRE_ZU);
+    // Kugel-Index für diese Phase (0=unten, 1=mitte, 2=oben)
+    int kugelIdx = (anlage.servoReleasePhase - 1) / 2; // 0,0 -> 1,1 -> 2,2
+    int subPhase =
+        (anlage.servoReleasePhase - 1) % 2; // 0=Strecke+Auf, 1=Zu+Warten
+
+    switch (subPhase) {
+    case 0: { // Strecke für aktuelle Kugel einstellen + Servo öffnen
+      // Nur Motorrichtung für Röhre einstellen, ohne ServoStart/Weiche neu zu
+      // triggern
+      bool isWinner = (anlage.winnerIndex == kugelIdx);
+      anlage.roehreRichtung =
+          isWinner ? false : true; // false=Rampe(Gewinner), true=Aussortieren
+      anlage.roehreAktiv = true;
+      anlage.roehreStartMs = jetzt;
+      Actuators::setMotor(PIN_R_MROEHRE, PIN_G_MROEHRE, anlage.roehreRichtung);
+
+      anlage.servoAuf = true;
+      Actuators::setServoWinkel(anlage.servoAufWinkel);
+      unsigned long openTime = (kugelIdx == 0)   ? anlage.time3Ball
+                               : (kugelIdx == 1) ? anlage.time2Ball
+                                                 : anlage.time1Ball;
+      anlage.servoReleaseNextMs = jetzt + openTime;
+      anlage.servoReleasePhase++;
+      Serial.print("Auslass ");
+      Serial.print(kugelIdx + 1);
+      Serial.print(" Auf! Zeit: ");
+      Serial.println(openTime);
+      break;
+    }
+    case 1: { // Servo schließen, warten bis Kugel an Weiche ist
+      anlage.servoAuf = false;
+      Actuators::setServoWinkel(anlage.servoZuWinkel);
+      Serial.print("Auslass ");
+      Serial.print(kugelIdx + 1);
+      Serial.println(" Zu.");
+      if (kugelIdx == 2) {
+        // Letzte Kugel -> fertig
         anlage.servoReleasePhase = 0;
         anlage.aufzugStopMs = jetzt + DELAY_AUFZUG_STOP_MS;
         anlage.raceState = WebVisu::RACE_FINISHED;
-        break;
+      } else {
+        anlage.servoReleaseNextMs =
+            jetzt + DELAY_KUGEL_BIS_WEICHE_MS; // Danach direkt Phase 0 für
+                                               // nächste Kugel (Weiche dreht
+                                               // sich parallel zum Kugel-Fall)
+        anlage.servoReleasePhase++;
+      }
+      break;
+    }
     }
   }
 }
 
 void resetRace() {
   anlage.raceState = WebVisu::RACE_IDLE;
-  anlage.ballsStarted = 0;
-  anlage.ballsFinished = 0;
-  anlage.ballsSecondPass = 0;
-  anlage.kugelnSeitReset = 0;
-  for(int i=0; i<3; i++) {
-    kugelHistorie[i] = {0,0,0,false,false};
-  }
-  if (anlage.aufzugAktiv) {
-    anlage.aufzugAktiv = false;
-    Actuators::stopMotor(PIN_R_MAUFZUG, PIN_G_MAUFZUG);
+  anlage.raceBallsStarted = 0;
+  anlage.raceBallsFinished = 0;
+  anlage.raceBallsSecondPass = 0;
+  for (int i = 0; i < 3; i++) {
+    kugelHistorie[i] = {0, 0, 0, false, false};
   }
 }
 
@@ -395,11 +426,19 @@ void updateWebCommand(unsigned long jetzt) {
   case WebVisu::CMD_RACE_START:
     resetRace();
     anlage.raceState = WebVisu::RACE_RUNNING;
-    anlage.streckenMode = 5; // Zufall
-    setStreckeIntern(random(2, 5), jetzt); // Sofort Strecke stellen, damit nichts auf Aussortieren stehen bleibt
+    anlage.streckenMode = anlage.raceStreckenMode;
+    if (anlage.streckenMode == 5) {
+      setStreckeIntern(random(2, 5),
+                       jetzt); // Sofort Strecke stellen, damit nichts auf
+                               // Aussortieren stehen bleibt
+    } else if (anlage.streckenMode == 6) {
+      setStreckeIntern(2, jetzt); // Start mit Default-Wert für Gleichmäßig
+    } else {
+      setStreckeIntern(anlage.streckenMode, jetzt);
+    }
     anlage.aufzugStopMs = 0;
     anlage.servoReleasePhase = 0;
-    
+
     if (!anlage.aufzugAktiv) {
       anlage.aufzugAktiv = true;
       Actuators::setMotor(PIN_R_MAUFZUG, PIN_G_MAUFZUG, true);
@@ -411,6 +450,21 @@ void updateWebCommand(unsigned long jetzt) {
   case WebVisu::CMD_TOGGLE_AUSSORTIEREN:
     anlage.aussortierenAktiv = !anlage.aussortierenAktiv;
     break;
+  case WebVisu::CMD_TEST_RELEASE:
+    if (anlage.aufzugAktiv) {
+      anlage.aufzugAktiv = false;
+      Actuators::stopMotor(PIN_R_MAUFZUG, PIN_G_MAUFZUG);
+    }
+    anlage.servoAuf = false;
+    Actuators::setServoWinkel(anlage.servoZuWinkel);
+    anlage.winnerIndex = 0;
+    anlage.servoReleasePhase = 1;
+    anlage.servoReleaseNextMs = jetzt;
+    break;
+  case WebVisu::CMD_RACE_STRECKE_SET:
+    anlage.raceStreckenMode = WebVisu::consumeCommandArg();
+    break;
+
   case WebVisu::CMD_STRECKE_SET:
     anlage.streckenMode = WebVisu::consumeCommandArg();
     if (anlage.streckenMode >= 1 && anlage.streckenMode <= 4) {
@@ -430,6 +484,7 @@ void updateWebCommand(unsigned long jetzt) {
     break;
   case WebVisu::CMD_RESET_STATS:
     anlage.kugelnSeitReset = 0;
+    anlage.kugelnUntenSeitReset = 0;
     break;
   case WebVisu::CMD_NONE:
     break;
@@ -463,7 +518,7 @@ void updateLampen(unsigned long jetzt) {
 }
 
 volatile bool shockFlankeErkannt = false;
-volatile bool shockZustandISR = false;
+volatile int shockZustandISR = 0;
 
 void shockISR() {
   shockZustandISR = digitalRead(PIN_Shocksensor_IN);
@@ -473,8 +528,12 @@ void shockISR() {
 void updateShocksensor(unsigned long jetzt) {
   if (shockFlankeErkannt) {
     shockFlankeErkannt = false;
-    printUptime(jetzt);
-    Serial.println("Shocksensor Flanke erkannt");
+    static unsigned long lastShockMs = 0;
+    if (jetzt - lastShockMs >= SHOCKSENSOR_DEBOUNCE_MS) {
+      lastShockMs = jetzt;
+      Serial.println("Shocksensor Flanke erkannt - LED Toggle!");
+      anlage.ledFarbeToggle = !anlage.ledFarbeToggle;
+    }
   }
 }
 
@@ -482,8 +541,14 @@ void updateLEDs() {
   bool scharf = anlage.anlageScharf;
   digitalWrite(PIN_LED_LICHTSCHRANKE_OBEN, scharf ? HIGH : LOW);
   digitalWrite(PIN_LED_LICHTSCHRANKE_UNTEN, scharf ? HIGH : LOW);
-  digitalWrite(PIN_2FarbigeLED_Out1, scharf ? HIGH : LOW);
-  digitalWrite(PIN_2FarbigeLED_Out2, LOW);
+
+  if (scharf) {
+    digitalWrite(PIN_2FarbigeLED_Out1, anlage.ledFarbeToggle ? LOW : HIGH);
+    digitalWrite(PIN_2FarbigeLED_Out2, anlage.ledFarbeToggle ? HIGH : LOW);
+  } else {
+    digitalWrite(PIN_2FarbigeLED_Out1, LOW);
+    digitalWrite(PIN_2FarbigeLED_Out2, LOW);
+  }
 }
 
 WebVisuState webStatus(unsigned long jetzt) {
@@ -499,6 +564,7 @@ WebVisuState webStatus(unsigned long jetzt) {
   s.roehreRichtung = anlage.roehreRichtung;
   s.servoAuf = anlage.servoAuf;
   s.lampenAn = anlage.lampenAn;
+
   s.taster0 = tasterLoop.isPressed();
   s.taster1 = tasterRoehre.isPressed();
   s.taster2 = tasterServoBlockade.isPressed();
@@ -513,11 +579,12 @@ WebVisuState webStatus(unsigned long jetzt) {
   }
   s.messungAnzahl = anlage.messungAnzahl;
   s.raceState = anlage.raceState;
-  s.ballsSecondPass = anlage.ballsSecondPass;
+  s.ballsSecondPass = anlage.raceBallsSecondPass;
   s.startRichtungMode = anlage.startRichtungMode;
   s.kugelnSeitReset = anlage.kugelnSeitReset;
   s.aussortierenAktiv = anlage.aussortierenAktiv;
   s.streckenMode = anlage.streckenMode;
+  s.raceStreckenMode = anlage.raceStreckenMode;
 
   s.loopStartMs = anlage.loopStartMs;
   s.roehreStartMs = anlage.roehreStartMs;
@@ -528,7 +595,8 @@ WebVisuState webStatus(unsigned long jetzt) {
 
 void setup() {
   Actuators::begin();
-  Actuators::setServoStartWinkel(anlage.servoStartIstRechts ? SERVOSTART_RECHTS : SERVOSTART_LINKS);
+  Actuators::setServoStartWinkel(anlage.servoStartIstRechts ? SERVOSTART_RECHTS
+                                                            : SERVOSTART_LINKS);
 
   tasterLoop.begin();
   tasterRoehre.begin();
@@ -538,7 +606,7 @@ void setup() {
   pinMode(PIN_LED_LICHTSCHRANKE_OBEN, OUTPUT);
   pinMode(PIN_LED_LICHTSCHRANKE_UNTEN, OUTPUT);
   pinMode(PIN_2FarbigeLED_Out1, OUTPUT);
-  pinMode(PIN_2FarbigeLED_Out2, OUTPUT);
+  // Shocksensor (Hardware Interrupt)
   pinMode(PIN_Shocksensor_IN, INPUT);
   attachInterrupt(digitalPinToInterrupt(PIN_Shocksensor_IN), shockISR, CHANGE);
   digitalWrite(PIN_LED_LICHTSCHRANKE_OBEN, HIGH);

@@ -14,6 +14,9 @@ struct WebVisuState {
     bool servoAuf;
     bool lampenAn;
 
+
+
+
     bool taster0;
     bool taster1;
     bool taster2;
@@ -41,6 +44,7 @@ struct WebVisuState {
     int kugelnSeitReset;
     bool aussortierenAktiv;
     int streckenMode; // 0=Manuell, 1=Aussortieren, 2=Rampe, 3=Looping, 4=Gerade, 5=Zufall, 6=Gleichmaessig
+    int raceStreckenMode;
 
     unsigned long loopStartMs;
     unsigned long roehreStartMs;
@@ -66,7 +70,9 @@ namespace WebVisu {
         CMD_STARTRICHTUNG_SET,
         CMD_RESET_STATS,
         CMD_TOGGLE_AUSSORTIEREN,
-        CMD_STRECKE_SET
+        CMD_STRECKE_SET,
+        CMD_RACE_STRECKE_SET,
+        CMD_TEST_RELEASE
     };
 
     void begin(const char* ssid, const char* pass);
