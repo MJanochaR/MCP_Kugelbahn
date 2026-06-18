@@ -192,6 +192,7 @@ namespace {
             client.print(",\"dauerMs\":"); client.print(lastState.kugeln[i].dauerMs);
             client.print(",\"aktiv\":"); client.print(onOff(lastState.kugeln[i].aktiv));
             client.print(",\"abgeschlossen\":"); client.print(onOff(lastState.kugeln[i].abgeschlossen));
+            client.print(",\"strecke\":"); client.print(lastState.kugeln[i].strecke);
             client.print("}");
             if (i < 2) client.print(",");
         }
@@ -204,6 +205,25 @@ namespace {
         client.print("\"streckenMode\":"); client.print(lastState.streckenMode); client.print(',');
         client.print("\"raceStreckenMode\":"); client.print(lastState.raceStreckenMode); client.print(',');
         client.print("\"kugelnSeitReset\":"); client.print(lastState.kugelnSeitReset); client.print(',');
+        client.print("\"alltimeFastestMs\":"); client.print(lastState.alltimeFastestMs); client.print(',');
+        client.print("\"alltimeFastestStrecke\":"); client.print(lastState.alltimeFastestStrecke); client.print(',');
+        
+        client.print("\"fastestMsPerStrecke\":[");
+        for(int i=0; i<5; i++) {
+            client.print(lastState.fastestMsPerStrecke[i]);
+            if(i<4) client.print(",");
+        }
+        client.print("],");
+
+        client.print("\"runsPerStrecke\":[");
+        for(int i=0; i<5; i++) {
+            client.print(lastState.runsPerStrecke[i]);
+            if(i<4) client.print(",");
+        }
+        client.print("],");
+
+        client.print("\"aussortierteKugelnGesamt\":"); client.print(lastState.aussortierteKugelnGesamt); client.print(',');
+
         client.print("\"loopStartMs\":"); client.print(lastState.loopStartMs); client.print(',');
         client.print("\"roehreStartMs\":"); client.print(lastState.roehreStartMs); client.print(',');
         client.print("\"aufzugAktiv\":"); client.print(onOff(lastState.aufzugAktiv)); client.print(',');

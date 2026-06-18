@@ -51,6 +51,7 @@ struct Anlage {
 
   bool aussortierenAktiv = false;
   bool ledFarbeToggle = false;
+  bool warteAufSchockSensorGruen = false;
   unsigned long aufzugStopMs = 0;
 
   // Servo Auslass Queue
@@ -65,6 +66,13 @@ struct Anlage {
   int servoAufWinkel = SERVROEHRE_AUF;
   int servoZuWinkel = SERVROEHRE_ZU;
   int winnerIndex = 0;
+
+  int aktuellerStreckenTyp = 0;
+  unsigned long alltimeFastestMs = 0xFFFFFFFF;
+  int alltimeFastestStrecke = 0;
+  unsigned long fastestMsPerStrecke[5] = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF};
+  int runsPerStrecke[5] = {0, 0, 0, 0, 0};
+  int aussortierteKugelnGesamt = 0;
 } anlage;
 
 WebVisuState::KugelData kugelHistorie[3] = {};
@@ -176,6 +184,8 @@ void setStreckeIntern(int typ, unsigned long jetzt) {
     Actuators::setServoWinkel(anlage.servoAufWinkel);
   }
 
+  anlage.aktuellerStreckenTyp = typ;
+
   switch (typ) {
   case 1: // Aussortieren
     anlage.servoStartIstRechts = false;
@@ -260,6 +270,7 @@ void updateLichtschranken(unsigned long jetzt) {
           kugelHistorie[idx].dauerMs = 0;
           kugelHistorie[idx].aktiv = true;
           kugelHistorie[idx].abgeschlossen = false;
+          kugelHistorie[idx].strecke = anlage.aktuellerStreckenTyp;
         }
 
         anlage.raceBallsStarted++;
@@ -287,6 +298,10 @@ void updateLichtschranken(unsigned long jetzt) {
             anlage.aufzugStopMs = jetzt + DELAY_AUFZUG_STOP_MS;
             anlage.servoReleasePhase = 1;
             anlage.servoReleaseNextMs = jetzt + SERVO_RELEASE_DELAY_MS;
+            
+            // LED auf Farbe 1 (Rot) stellen
+            anlage.ledFarbeToggle = false;
+
             Serial.print("6 Kugeln erkannt. Aufzug stoppt in ");
             Serial.print(DELAY_AUFZUG_STOP_MS);
             Serial.println(" ms. Release-Sequenz startet in ");
@@ -301,10 +316,25 @@ void updateLichtschranken(unsigned long jetzt) {
   if (lichtschrankeUnten.triggered()) {
     anlage.kugelnUntenSeitReset++; // Globale Statistik
 
-    int printKugelNummer = (anlage.raceState == WebVisu::RACE_RUNNING)
-                               ? ((anlage.raceBallsFinished % 3) + 1)
-                               : (((anlage.kugelnUntenSeitReset - 1) % 3) + 1);
-    printLichtschranke("Unten", printKugelNummer);
+    bool unerwartet = false;
+    if (anlage.raceState == WebVisu::RACE_RUNNING) {
+      if (anlage.raceBallsFinished >= anlage.raceBallsStarted) {
+        unerwartet = true;
+      }
+    } else {
+      if (anlage.kugelnUntenSeitReset > anlage.kugelnSeitReset) {
+        unerwartet = true;
+      }
+    }
+
+    if (unerwartet) {
+      Serial.println("LS Unten: Erkannt");
+    } else {
+      int printKugelNummer = (anlage.raceState == WebVisu::RACE_RUNNING)
+                                 ? ((anlage.raceBallsFinished % 3) + 1)
+                                 : (((anlage.kugelnUntenSeitReset - 1) % 3) + 1);
+      printLichtschranke("Unten", printKugelNummer);
+    }
 
     if (anlage.anlageScharf) {
       if (anlage.raceState == WebVisu::RACE_RUNNING) {
@@ -320,6 +350,18 @@ void updateLichtschranken(unsigned long jetzt) {
             kugelHistorie[idx].dauerMs = dauer;
             kugelHistorie[idx].aktiv = false;
             kugelHistorie[idx].abgeschlossen = true;
+
+            int strecke = kugelHistorie[idx].strecke;
+            if (strecke > 0 && strecke <= 4) {
+              anlage.runsPerStrecke[strecke]++;
+              if (dauer < anlage.fastestMsPerStrecke[strecke]) {
+                anlage.fastestMsPerStrecke[strecke] = dauer;
+              }
+              if (dauer < anlage.alltimeFastestMs) {
+                anlage.alltimeFastestMs = dauer;
+                anlage.alltimeFastestStrecke = strecke;
+              }
+            }
 
             anlage.messungAnzahl++;
           }
@@ -372,6 +414,9 @@ void updateRaceTasks(unsigned long jetzt) {
       // Nur Motorrichtung für Röhre einstellen, ohne ServoStart/Weiche neu zu
       // triggern
       bool isWinner = (anlage.winnerIndex == kugelIdx);
+      if (!isWinner) {
+        anlage.aussortierteKugelnGesamt++;
+      }
       anlage.roehreRichtung =
           isWinner ? false : true; // false=Rampe(Gewinner), true=Aussortieren
       anlage.roehreAktiv = true;
@@ -389,6 +434,10 @@ void updateRaceTasks(unsigned long jetzt) {
       Serial.print(kugelIdx + 1);
       Serial.print(" Auf! Zeit: ");
       Serial.println(openTime);
+
+      if (kugelIdx == 2) {
+        anlage.warteAufSchockSensorGruen = true;
+      }
       break;
     }
     case 1: { // Servo schließen, warten bis Kugel an Weiche ist
@@ -420,11 +469,12 @@ void resetRace() {
   anlage.raceBallsFinished = 0;
   anlage.raceBallsSecondPass = 0;
   for (int i = 0; i < 3; i++) {
-    kugelHistorie[i] = {0, 0, 0, false, false};
+    kugelHistorie[i] = {0, 0, 0, false, false, 0};
   }
   anlage.aufzugStopMs = 0;
   anlage.servoReleasePhase = 0;
   anlage.servoReleaseNextMs = 0;
+  anlage.warteAufSchockSensorGruen = false;
 }
 
 void updateWebCommand(unsigned long jetzt) {
@@ -472,6 +522,22 @@ void updateWebCommand(unsigned long jetzt) {
       anlage.aufzugAktiv = true;
       Actuators::setMotor(PIN_R_MAUFZUG, PIN_G_MAUFZUG, true);
     }
+
+    Serial.println("=====================================");
+    Serial.println("Rennen gestartet!");
+    Serial.print("Modus: ");
+    if (anlage.aussortierenAktiv) {
+      Serial.println("MIT Aussortieren");
+    } else {
+      Serial.println("OHNE Aussortieren");
+    }
+    Serial.print("Strecke: ");
+    switch(anlage.raceStreckenMode) {
+      case 5: Serial.println("Zufall"); break;
+      case 6: Serial.println("Gleichmaessig"); break;
+      default: Serial.print("Modus "); Serial.println(anlage.raceStreckenMode); break;
+    }
+    Serial.println("=====================================");
     break;
   case WebVisu::CMD_RACE_RESET:
     resetRace();
@@ -518,6 +584,14 @@ void updateWebCommand(unsigned long jetzt) {
   case WebVisu::CMD_RESET_STATS:
     anlage.kugelnSeitReset = 0;
     anlage.kugelnUntenSeitReset = 0;
+    anlage.messungAnzahl = 0;
+    anlage.aussortierteKugelnGesamt = 0;
+    anlage.alltimeFastestMs = 0xFFFFFFFF;
+    anlage.alltimeFastestStrecke = 0;
+    for (int i = 0; i < 5; i++) {
+      anlage.fastestMsPerStrecke[i] = 0xFFFFFFFF;
+      anlage.runsPerStrecke[i] = 0;
+    }
     break;
   case WebVisu::CMD_NONE:
     break;
@@ -564,8 +638,11 @@ void updateShocksensor(unsigned long jetzt) {
     static unsigned long lastShockMs = 0;
     if (jetzt - lastShockMs >= SHOCKSENSOR_DEBOUNCE_MS) {
       lastShockMs = jetzt;
-      Serial.println("Shocksensor Flanke erkannt - LED Toggle!");
-      anlage.ledFarbeToggle = !anlage.ledFarbeToggle;
+      if (anlage.warteAufSchockSensorGruen) {
+        Serial.println("Shocksensor Flanke erkannt - Letzte Kugel durch! LED Gruen!");
+        anlage.ledFarbeToggle = true; // Farbe 2 (Grün)
+        anlage.warteAufSchockSensorGruen = false;
+      }
     }
   }
 }
@@ -621,6 +698,15 @@ WebVisuState webStatus(unsigned long jetzt) {
 
   s.loopStartMs = anlage.loopStartMs;
   s.roehreStartMs = anlage.roehreStartMs;
+
+  s.alltimeFastestMs = anlage.alltimeFastestMs;
+  s.alltimeFastestStrecke = anlage.alltimeFastestStrecke;
+  for (int i = 0; i < 5; i++) {
+    s.fastestMsPerStrecke[i] = anlage.fastestMsPerStrecke[i];
+    s.runsPerStrecke[i] = anlage.runsPerStrecke[i];
+  }
+  s.aussortierteKugelnGesamt = anlage.aussortierteKugelnGesamt;
+
   return s;
 }
 

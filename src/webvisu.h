@@ -33,6 +33,7 @@ struct WebVisuState {
         unsigned long dauerMs;
         bool aktiv;
         bool abgeschlossen;
+        int strecke;
     };
     KugelData kugeln[3];
     unsigned long messungAnzahl;
@@ -45,6 +46,12 @@ struct WebVisuState {
     bool aussortierenAktiv;
     int streckenMode; // 0=Manuell, 1=Aussortieren, 2=Rampe, 3=Looping, 4=Gerade, 5=Zufall, 6=Gleichmaessig
     int raceStreckenMode;
+
+    unsigned long alltimeFastestMs;
+    int alltimeFastestStrecke;
+    unsigned long fastestMsPerStrecke[5];
+    int runsPerStrecke[5];
+    int aussortierteKugelnGesamt;
 
     unsigned long loopStartMs;
     unsigned long roehreStartMs;

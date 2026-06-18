@@ -141,10 +141,21 @@ button.stop{background:#b42318}
 
 <h2>Statistik</h2>
 <div class="grid">
- <div class="card">
-   <h3>Durchlaufene Kugeln</h3>
-   <p>Seit letztem Reset: <span id="kugelnCount" class="big"></span></p>
-   <button onclick="cmd('reset_stats')">Zähler zurücksetzen</button>
+  <div class="card">
+   <h3>Globale Werte</h3>
+   <p>Kugeln gesamt (unten): <span id="kugelnCount" class="big"></span></p>
+   <p>Aussortierte Kugeln: <span id="aussortiertCount" class="big"></span></p>
+   <hr style="border:0; border-top:1px solid #ccc; margin:10px 0;">
+   <p><b>Alltime Schnellste Zeit:</b><br><span id="alltimeFastest" class="value"></span></p>
+   <button onclick="cmd('reset_stats')">Zähler & Rekorde zurücksetzen</button>
+ </div>
+ <div class="card" style="grid-column: span 2;">
+   <h3>Strecken-Statistiken</h3>
+   <table style="width:100%;text-align:left;border-collapse:collapse;font-size:14px;margin-top:10px;">
+     <tr style="border-bottom:1px solid #e5e7eb"><th>Strecke</th><th>Durchläufe</th><th>Schnellste Zeit</th></tr>
+     <tbody id="statsStreckenBody">
+     </tbody>
+   </table>
  </div>
 </div>
 
@@ -245,12 +256,31 @@ async function load(){
     if (d.kugeln) {
       d.kugeln.forEach((k, idx) => {
         let dauer = k.aktiv ? zeit(d.uptimeMs - k.startMs) : (k.abgeschlossen ? zeit(k.dauerMs) : '-');
-        html += `<tr><td>Kugel ${idx + 1}</td><td>${k.startMs ? ms(k.startMs) : '-'}</td><td>${k.endMs ? ms(k.endMs) : '-'}</td><td>${dauer}</td></tr>`;
+        let strInfo = (k.strecke > 0 && k.strecke <= 4) ? ` (${streckenStrs[k.strecke]})` : '';
+        html += `<tr><td>Kugel ${idx + 1}${strInfo}</td><td>${k.startMs ? ms(k.startMs) : '-'}</td><td>${k.endMs ? ms(k.endMs) : '-'}</td><td>${dauer}</td></tr>`;
       });
     }
     $('kugelnBody').innerHTML = html;
 
     $('kugelnCount').textContent = d.kugelnSeitReset;
+    $('aussortiertCount').textContent = d.aussortierteKugelnGesamt !== undefined ? d.aussortierteKugelnGesamt : 0;
+    
+    if (d.alltimeFastestMs !== undefined && d.alltimeFastestMs < 4000000000) {
+      $('alltimeFastest').textContent = zeit(d.alltimeFastestMs) + ' auf ' + streckenStrs[d.alltimeFastestStrecke];
+    } else {
+      $('alltimeFastest').textContent = '-';
+    }
+
+    let statsHtml = '';
+    if (d.runsPerStrecke !== undefined && d.fastestMsPerStrecke !== undefined) {
+      for(let i = 1; i <= 4; i++) {
+        let ft = d.fastestMsPerStrecke[i] < 4000000000 ? zeit(d.fastestMsPerStrecke[i]) : '-';
+        statsHtml += `<tr><td>${streckenStrs[i]}</td><td>${d.runsPerStrecke[i]}</td><td>${ft}</td></tr>`;
+      }
+    }
+    const elStats = $('statsStreckenBody');
+    if(elStats) elStats.innerHTML = statsHtml;
+
   } catch(e) {
     console.error('API nicht erreichbar:', e);
   }
