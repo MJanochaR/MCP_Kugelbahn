@@ -42,11 +42,11 @@ struct Anlage {
   int streckenMode = 0;      // 0=Manuell, 1=Aussortieren, 2=Rampe, 3=Looping,
                              // 4=Gerade, 5=Zufall, 6=Gleichmaessig
   int raceStreckenMode = 5;  // 5=Zufall, 6=Gleichmaessig
-  
+
   // Gesamtkugeln
   int kugelnSeitReset = 0;
   int kugelnUntenSeitReset = 0;
-  
+
   bool servoStartIstRechts = true;
 
   bool aussortierenAktiv = false;
@@ -166,11 +166,11 @@ void updateTaster(unsigned long jetzt) {
 }
 
 void setStreckeIntern(int typ, unsigned long jetzt) {
-  // Servo NICHT öffnen wenn Release-Sequenz läuft ODER Aussortieren-Sammlung
-  // aktiv
+  // Servo NICHT öffnen wenn Release-Sequenz läuft ODER Aussortieren-Sammlung aktiv (ab Kugel 4)
   bool releaseAktiv = anlage.servoReleasePhase > 0;
-  bool sammlung =
-      (anlage.raceState == WebVisu::RACE_RUNNING && anlage.aussortierenAktiv);
+  bool sammlung = (anlage.raceState == WebVisu::RACE_RUNNING && 
+                   anlage.aussortierenAktiv && 
+                   anlage.raceBallsStarted >= 3);
   if (!releaseAktiv && !sammlung) {
     anlage.servoAuf = true;
     Actuators::setServoWinkel(anlage.servoAufWinkel);
@@ -216,26 +216,38 @@ void updateLichtschranken(unsigned long jetzt) {
   if (lichtschrankeOben.triggered()) {
     anlage.kugelnSeitReset++; // Globale Statistik
 
-    int printKugelNummer = (anlage.raceState == WebVisu::RACE_RUNNING) ? ((anlage.raceBallsStarted % 3) + 1) : (((anlage.kugelnSeitReset - 1) % 3) + 1);
+    int printKugelNummer = (anlage.raceState == WebVisu::RACE_RUNNING)
+                               ? ((anlage.raceBallsStarted % 3) + 1)
+                               : (((anlage.kugelnSeitReset - 1) % 3) + 1);
     printLichtschranke("Oben", printKugelNummer);
 
     if (anlage.anlageScharf) {
-      if (anlage.streckenMode == 0) {        // Manuell
-        if (anlage.startRichtungMode == 0) { // Alternierend
-          anlage.servoStartIstRechts = !anlage.servoStartIstRechts;
-          Actuators::setServoStartWinkel(anlage.servoStartIstRechts
-                                             ? SERVOSTART_RECHTS
-                                             : SERVOSTART_LINKS);
+      // Wenn wir im Aussortieren-Rennen in der Sammelphase sind (ab Kugel 4), 
+      // überschreiben wir die Streckenlogik hart auf "Aussortieren" (1).
+      bool forceAussortieren = (anlage.raceState == WebVisu::RACE_RUNNING && 
+                                anlage.aussortierenAktiv && 
+                                anlage.raceBallsStarted >= 3);
+
+      if (forceAussortieren) {
+        setStreckeIntern(1, jetzt);
+      } else {
+        if (anlage.streckenMode == 0) {        // Manuell
+          if (anlage.startRichtungMode == 0) { // Alternierend
+            anlage.servoStartIstRechts = !anlage.servoStartIstRechts;
+            Actuators::setServoStartWinkel(anlage.servoStartIstRechts
+                                               ? SERVOSTART_RECHTS
+                                               : SERVOSTART_LINKS);
+          }
+        } else if (anlage.streckenMode == 5) { // Zufall
+          int r = random(2, 5);                // 2, 3, 4
+          setStreckeIntern(r, jetzt);
+        } else if (anlage.streckenMode == 6) { // Gleichmäßig
+          static int lastGleich = 1;
+          lastGleich++;
+          if (lastGleich > 4)
+            lastGleich = 2;
+          setStreckeIntern(lastGleich, jetzt);
         }
-      } else if (anlage.streckenMode == 5) { // Zufall
-        int r = random(2, 5);                // 2, 3, 4
-        setStreckeIntern(r, jetzt);
-      } else if (anlage.streckenMode == 6) { // Gleichmäßig
-        static int lastGleich = 1;
-        lastGleich++;
-        if (lastGleich > 4)
-          lastGleich = 2;
-        setStreckeIntern(lastGleich, jetzt);
       }
 
       // Rennen-Logik
@@ -256,12 +268,17 @@ void updateLichtschranken(unsigned long jetzt) {
           // Aussortieren AUS
           if (anlage.raceBallsStarted == 3) {
             anlage.aufzugStopMs = jetzt + DELAY_AUFZUG_STOP_MS;
-            // Wir setzen RACE_FINISHED hier nicht mehr sofort, sondern warten, bis Kugeln unten ankommen (oder timeout).
+            Serial.print("3 Kugeln erkannt. Aufzug stoppt in ");
+            Serial.print(DELAY_AUFZUG_STOP_MS);
+            Serial.println(" ms.");
+            // Wir setzen RACE_FINISHED hier nicht mehr sofort, sondern warten,
+            // bis Kugeln unten ankommen (oder timeout).
           }
         } else {
           // Aussortieren AN
           if (anlage.raceBallsStarted == 4) {
-            // 1. Kugel zum 2. Mal oben → Servo zu (Sammlung beginnt)
+            // 1. Kugel zum 2. Mal oben → Strecke ist durch forceAussortieren bereits auf Oben Links
+            // Servo zu (Sammlung beginnt)
             anlage.servoAuf = false;
             Actuators::setServoWinkel(SERVROEHRE_ZU);
           }
@@ -269,7 +286,12 @@ void updateLichtschranken(unsigned long jetzt) {
             // 3. Kugel zum 2. Mal oben → Aufzug stoppen und Auslass starten
             anlage.aufzugStopMs = jetzt + DELAY_AUFZUG_STOP_MS;
             anlage.servoReleasePhase = 1;
-            anlage.servoReleaseNextMs = jetzt;
+            anlage.servoReleaseNextMs = jetzt + SERVO_RELEASE_DELAY_MS;
+            Serial.print("6 Kugeln erkannt. Aufzug stoppt in ");
+            Serial.print(DELAY_AUFZUG_STOP_MS);
+            Serial.println(" ms. Release-Sequenz startet in ");
+            Serial.print(SERVO_RELEASE_DELAY_MS);
+            Serial.println(" ms.");
           }
         }
       }
@@ -279,15 +301,18 @@ void updateLichtschranken(unsigned long jetzt) {
   if (lichtschrankeUnten.triggered()) {
     anlage.kugelnUntenSeitReset++; // Globale Statistik
 
-    int printKugelNummer = (anlage.raceState == WebVisu::RACE_RUNNING) ? ((anlage.raceBallsFinished % 3) + 1) : (((anlage.kugelnUntenSeitReset - 1) % 3) + 1);
+    int printKugelNummer = (anlage.raceState == WebVisu::RACE_RUNNING)
+                               ? ((anlage.raceBallsFinished % 3) + 1)
+                               : (((anlage.kugelnUntenSeitReset - 1) % 3) + 1);
     printLichtschranke("Unten", printKugelNummer);
 
     if (anlage.anlageScharf) {
       if (anlage.raceState == WebVisu::RACE_RUNNING) {
         // Nur so viele unten zählen, wie oben gestartet sind (oder max 3)
-        if (anlage.raceBallsFinished < anlage.raceBallsStarted && anlage.raceBallsFinished < 3) {
+        if (anlage.raceBallsFinished < anlage.raceBallsStarted &&
+            anlage.raceBallsFinished < 3) {
           int idx = anlage.raceBallsFinished;
-          
+
           if (kugelHistorie[idx].aktiv) {
             unsigned long dauer = jetzt - kugelHistorie[idx].startMs;
 
@@ -301,12 +326,14 @@ void updateLichtschranken(unsigned long jetzt) {
           anlage.raceBallsFinished++;
 
           if (!anlage.aussortierenAktiv) {
-            // Rennen ohne Aussortieren: Wenn 3. Kugel unten ist, ist das Rennen fertig
+            // Rennen ohne Aussortieren: Wenn 3. Kugel unten ist, ist das Rennen
+            // fertig
             if (anlage.raceBallsFinished == 3) {
               anlage.raceState = WebVisu::RACE_FINISHED;
             }
           } else {
-            // Rennen mit Aussortieren: Wenn 3 Kugeln unten sind, Gewinner berechnen
+            // Rennen mit Aussortieren: Wenn 3 Kugeln unten sind, Gewinner
+            // berechnen
             if (anlage.raceBallsFinished == 3) {
               anlage.winnerIndex = 0;
               unsigned long bestTime = 0xFFFFFFFF;
@@ -373,7 +400,6 @@ void updateRaceTasks(unsigned long jetzt) {
       if (kugelIdx == 2) {
         // Letzte Kugel -> fertig
         anlage.servoReleasePhase = 0;
-        anlage.aufzugStopMs = jetzt + DELAY_AUFZUG_STOP_MS;
         anlage.raceState = WebVisu::RACE_FINISHED;
       } else {
         anlage.servoReleaseNextMs =
@@ -396,6 +422,9 @@ void resetRace() {
   for (int i = 0; i < 3; i++) {
     kugelHistorie[i] = {0, 0, 0, false, false};
   }
+  anlage.aufzugStopMs = 0;
+  anlage.servoReleasePhase = 0;
+  anlage.servoReleaseNextMs = 0;
 }
 
 void updateWebCommand(unsigned long jetzt) {
@@ -446,6 +475,10 @@ void updateWebCommand(unsigned long jetzt) {
     break;
   case WebVisu::CMD_RACE_RESET:
     resetRace();
+    if (anlage.aufzugAktiv) {
+      anlage.aufzugAktiv = false;
+      Actuators::stopMotor(PIN_R_MAUFZUG, PIN_G_MAUFZUG);
+    }
     break;
   case WebVisu::CMD_TOGGLE_AUSSORTIEREN:
     anlage.aussortierenAktiv = !anlage.aussortierenAktiv;
